@@ -189,13 +189,8 @@
       margin-right: 4px;
     }
 
-    .session-item-status.streaming { background: var(--green); animation: pulse 1.5s infinite; }
+    .session-item-status.streaming { background: var(--green); }
     .session-item-status.idle { background: var(--text-muted); }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
 
     /* ─── Chat Area ──────────────────────────────────────────── */
     .chat-area {
@@ -242,7 +237,7 @@
       flex-shrink: 0;
     }
 
-    .status-dot.streaming { background: var(--green); animation: pulse 1.5s infinite; }
+    .status-dot.streaming { background: var(--green); box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.25); }
     .status-dot.idle { background: var(--text-muted); }
 
     .driver-pill {
@@ -624,15 +619,12 @@
     }
 
     /* ─── Streaming cursor ───────────────────────────────────── */
+    /* Static caret — no animation. CSS animations keep Firefox's compositor
+       running at full refresh rate, which costs GPU we'd rather give the LLM. */
     .streaming-cursor::after {
-      content: '▋';
-      animation: blink 1s step-end infinite;
+      content: '▍';
       color: var(--accent);
-    }
-
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0; }
+      margin-left: 1px;
     }
   </style>
 </head>
@@ -757,7 +749,6 @@
 
       ws.onmessage = (e) => {
         const event = JSON.parse(e.data);
-        console.log('[ws] received:', event.type, event);
         handleServerEvent(event);
       };
 
@@ -869,17 +860,20 @@
           break;
 
         case 'message':
-          console.log('[message] received, sessionId=', event.sessionId, 'clientSessionId=', state.clientSessionId, 'match=', state.clientSessionId === event.sessionId);
           if (state.clientSessionId === event.sessionId) {
-            // Use the finalized flag from the server to determine behavior
             const isFinalized = event.message.finalized === true;
-            // Check if this is a continuation of streaming (only for non-finalized messages)
             const lastMsg = state.messages[state.messages.length - 1];
-            if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.finalized && !isFinalized) {
-              // Append to existing streaming message
-              lastMsg.content += typeof event.message.content === 'string' ? event.message.content : '';
-              lastMsg.timestamp = event.message.timestamp;
-              renderLastMessage();
+            if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.finalized && isFinalized) {
+              // Finalize the in-flight streaming bubble — replace with full formatted render
+              lastMsg.content = event.message.content;
+              lastMsg.finalized = true;
+              Object.assign(lastMsg, event.message, { finalized: true });
+              finalizeLastAssistantMessage(lastMsg);
+            } else if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.finalized && !isFinalized) {
+              // Mid-stream message replacement — append to text node
+              const delta = typeof event.message.content === 'string' ? event.message.content : '';
+              lastMsg.content += delta;
+              appendStreamingDelta(delta, false);
             } else {
               state.messages.push({ ...event.message, finalized: isFinalized });
               renderMessage(event.message);
@@ -888,12 +882,11 @@
           break;
 
         case 'streaming':
-          console.log('[streaming] received, sessionId=', event.sessionId, 'clientSessionId=', state.clientSessionId, 'match=', state.clientSessionId === event.sessionId);
           if (state.clientSessionId === event.sessionId) {
             const lastMsg = state.messages[state.messages.length - 1];
             if (lastMsg && !lastMsg.finalized) {
               lastMsg.content += event.delta;
-              renderLastMessage();
+              appendStreamingDelta(event.delta, !!event.isThinking);
             }
           }
           break;
@@ -977,8 +970,13 @@
     }
 
     // ─── Messages ───────────────────────────────────────────────────────────────
+    // Track the live-appending text nodes for the currently-streaming assistant bubble.
+    // Avoids tearing down + re-rendering DOM on every token (each tear-down forced a
+    // full HTML parse, regex pass over the entire response, and layout — burning GPU).
+    let streamingTextNode = null;
+    let streamingThinkingNode = null;
+
     function renderMessage(msg) {
-      console.log('[renderMessage]', msg.role, msg.finalized ? '(finalized)' : '(streaming)');
       const div = document.createElement('div');
       div.className = `message ${msg.role}`;
       div.dataset.role = msg.role;
@@ -991,19 +989,50 @@
       }
 
       messagesEl.appendChild(div);
+      // Reset streaming-node refs whenever we mount a new bubble.
+      streamingTextNode = null;
+      streamingThinkingNode = null;
       scrollToBottom();
     }
 
-    function renderLastMessage() {
-      const lastMsg = state.messages[state.messages.length - 1];
-      if (!lastMsg || lastMsg.role !== 'assistant') return;
+    // Append a token's worth of text to the currently-streaming assistant bubble.
+    // Plain text only during streaming — formatText runs once at finalize.
+    function appendStreamingDelta(delta, isThinking) {
       const msgs = messagesEl.querySelectorAll('.message.assistant');
-      const lastBubble = msgs[msgs.length - 1]?.querySelector('.message-bubble');
-      if (lastBubble) {
-        lastBubble.innerHTML = '';
-        appendToAssistant(lastBubble.parentElement, lastMsg);
-        scrollToBottom();
+      const bubble = msgs[msgs.length - 1]?.querySelector('.message-bubble');
+      if (!bubble) return;
+      if (isThinking) {
+        if (!streamingThinkingNode) {
+          const wrap = document.createElement('div');
+          wrap.className = 'thinking-block streaming-thinking';
+          wrap.innerHTML = '<div class="thinking-header">🧠 Thinking</div><div class="thinking-content"></div>';
+          bubble.appendChild(wrap);
+          streamingThinkingNode = wrap.querySelector('.thinking-content').appendChild(document.createTextNode(''));
+        }
+        streamingThinkingNode.data += delta;
+      } else {
+        if (!streamingTextNode) {
+          const textDiv = document.createElement('div');
+          textDiv.className = 'message-text streaming-cursor';
+          bubble.appendChild(textDiv);
+          streamingTextNode = textDiv.appendChild(document.createTextNode(''));
+        }
+        streamingTextNode.data += delta;
       }
+      scrollToBottom();
+    }
+
+    // When the assistant's message_end arrives, replace the streaming text nodes
+    // with a one-time fully-formatted render (markdown, code blocks, etc.).
+    function finalizeLastAssistantMessage(msg) {
+      const msgs = messagesEl.querySelectorAll('.message.assistant');
+      const bubble = msgs[msgs.length - 1]?.querySelector('.message-bubble');
+      if (!bubble) return;
+      bubble.innerHTML = '';
+      appendToAssistant(bubble.parentElement, msg);
+      streamingTextNode = null;
+      streamingThinkingNode = null;
+      scrollToBottom();
     }
 
     function appendToAssistant(msgEl, msg) {
@@ -1240,8 +1269,14 @@
     }
 
     // ─── Scroll ─────────────────────────────────────────────────────────────────
+    // Coalesce many same-frame scroll requests (e.g. one per streaming token) into a
+    // single rAF callback so we don't force layout per delta.
+    let scrollPending = false;
     function scrollToBottom() {
+      if (scrollPending) return;
+      scrollPending = true;
       requestAnimationFrame(() => {
+        scrollPending = false;
         messagesEl.scrollTop = messagesEl.scrollHeight;
       });
     }

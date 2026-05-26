@@ -58,6 +58,20 @@ const sessions = new Map<string, SessionState>();
 const clients = new Set<Client>();
 let clientIdCounter = 0;
 
+function ts(): string {
+  return new Date().toISOString().slice(11, 23);
+}
+function shortId(id: string): string {
+  return id ? id.slice(0, 8) : "????????";
+}
+function slog(s: SessionState, ...args: unknown[]): void {
+  console.log(`${ts()} [${shortId(s.sessionId)}]`, ...args);
+}
+function preview(text: string, n = 60): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > n ? t.slice(0, n) + "…" : t;
+}
+
 // ─── JSONL helpers ──────────────────────────────────────────────────────────
 
 interface JsonlEntry {
@@ -99,14 +113,19 @@ function normalizeMessage(msg: any, opts: { finalized: boolean }): any {
       .map((c: any) => c.text)
       .join("\n");
   }
+  // If the turn errored, surface the error text in-band so it's not a silent empty bubble.
+  if (msg.stopReason === "error" && msg.errorMessage && !text) {
+    text = `⚠ ${msg.errorMessage}`;
+  }
   return {
     role: msg.role,
     content: text,
     timestamp: msg.timestamp ?? Date.now(),
     toolCallId: msg.toolCallId,
     toolName: msg.toolName,
-    isError: msg.isError,
+    isError: msg.isError || msg.stopReason === "error",
     stopReason: msg.stopReason,
+    errorMessage: msg.errorMessage,
     usage: msg.usage,
     finalized: opts.finalized,
   };
@@ -178,8 +197,9 @@ async function getOrCreateSessionState(sessionFile: string): Promise<SessionStat
   };
   s.watcher = startWatcher(s);
   sessions.set(sessionFile, s);
-  console.log(
-    `[session ${sessionId}] opened sessionFile=${sessionFile} cwd=${cwd} entries=${s.knownEntryIds.size}`,
+  slog(
+    s,
+    `📂 opened cwd=${cwd} entries=${s.knownEntryIds.size} file=${path.basename(sessionFile)}`,
   );
   return s;
 }
@@ -253,11 +273,10 @@ async function readNewEntries(s: SessionState): Promise<void> {
   if (!sawExternal) return;
 
   if (s.driver === "self") {
-    console.warn(
-      `[session ${s.sessionId}] external write detected while owner — releasing ownership`,
-    );
+    slog(s, "⚠ external write detected while we own — releasing");
     await releaseOwnership(s, "external write detected — pi-CLI took over");
   } else if (s.driver !== "external") {
+    slog(s, "📝 external write — driver=external");
     s.driver = "external";
     broadcastDriverUpdate(s);
   }
@@ -283,7 +302,7 @@ async function takeOwnership(s: SessionState): Promise<void> {
     settingsManager,
   });
   await resourceLoader.reload();
-  const { session } = await createAgentSession({
+  const { session, modelFallbackMessage } = await createAgentSession({
     cwd: s.cwd,
     agentDir: AGENT_DIR,
     sessionManager: SessionManager.open(s.sessionFile),
@@ -291,7 +310,13 @@ async function takeOwnership(s: SessionState): Promise<void> {
     resourceLoader,
   });
   s.agentSession = session;
-  s.agentUnsubscribe = session.subscribe((event) => handleAgentEvent(s, event));
+  s.agentUnsubscribe = session.subscribe((event) => {
+    try {
+      handleAgentEvent(s, event);
+    } catch (err) {
+      slog(s, `✗ handleAgentEvent threw for event=${event.type}:`, err);
+    }
+  });
   s.driver = "self";
   if (s.externalIdleTimer) {
     clearTimeout(s.externalIdleTimer);
@@ -302,7 +327,12 @@ async function takeOwnership(s: SessionState): Promise<void> {
     if (entry.id) s.knownEntryIds.add(entry.id);
   }
   broadcastDriverUpdate(s);
-  console.log(`[session ${s.sessionId}] took ownership`);
+  const m = session.model;
+  slog(
+    s,
+    `🎬 took ownership model=${m ? `${m.provider}/${m.id}` : "<none>"} thinking=${session.thinkingLevel} baseUrl=${m?.baseUrl ?? "?"} existingMessages=${session.messages.length}`,
+  );
+  if (modelFallbackMessage) slog(s, `   modelFallback: ${modelFallbackMessage}`);
 }
 
 async function releaseOwnership(s: SessionState, reasonMessage?: string): Promise<void> {
@@ -321,7 +351,7 @@ async function releaseOwnership(s: SessionState, reasonMessage?: string): Promis
   if (reasonMessage) {
     broadcastToSession(s, { type: "error", message: reasonMessage });
   }
-  console.log(`[session ${s.sessionId}] released ownership`);
+  slog(s, `🛑 released ownership${reasonMessage ? ` (${reasonMessage})` : ""}`);
 }
 
 // ─── Agent event → wire event ───────────────────────────────────────────────
@@ -330,6 +360,7 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
   const sessionId = s.sessionId;
   switch (event.type) {
     case "agent_start":
+      slog(s, "▶ agent_start (LLM call beginning)");
       broadcastToSession(s, {
         type: "session_update",
         sessionId,
@@ -338,7 +369,12 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
       });
       break;
 
-    case "agent_end":
+    case "agent_end": {
+      const reason = (event as any).reason ?? "";
+      slog(
+        s,
+        `⏹ agent_end${reason ? ` (${reason})` : ""} willRetry=${(event as any).willRetry ?? false} messages=${s.agentSession?.messages.length ?? 0}`,
+      );
       broadcastToSession(s, {
         type: "session_update",
         sessionId,
@@ -347,14 +383,18 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
         messageCount: s.agentSession?.messages.length ?? 0,
       });
       break;
+    }
 
-    case "message_start":
+    case "message_start": {
+      const role = (event.message as any).role ?? "?";
+      slog(s, `↳ message_start role=${role}`);
       broadcastToSession(s, {
         type: "message",
         sessionId,
         message: normalizeMessage(event.message, { finalized: false }),
       });
       break;
+    }
 
     case "message_update":
       if (event.assistantMessageEvent.type === "text_delta") {
@@ -374,16 +414,21 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
       break;
 
     case "message_end": {
-      const id = (event.message as any).id;
+      const m = event.message as any;
+      const id = m.id;
       if (id) s.knownEntryIds.add(id);
-      // Catch up by syncing known IDs from the session manager (the message persisted
-      // by the agent right after this listener returns will be picked up here too on
-      // the next pass, but we also pre-seed via session manager entries below).
       if (s.agentSession) {
         for (const entry of s.agentSession.sessionManager.getEntries()) {
           if (entry.id) s.knownEntryIds.add(entry.id);
         }
       }
+      const role = m.role ?? "?";
+      const stop = m.stopReason ? ` stop=${m.stopReason}` : "";
+      const err = m.errorMessage ? ` err="${preview(m.errorMessage, 80)}"` : "";
+      const tokens = m.usage
+        ? ` tokens=${m.usage.input ?? 0}/${m.usage.output ?? 0}`
+        : "";
+      slog(s, `✓ message_end role=${role}${stop}${err}${tokens}`);
       broadcastToSession(s, {
         type: "message",
         sessionId,
@@ -393,6 +438,7 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
     }
 
     case "tool_execution_start":
+      slog(s, `🔧 tool_start ${event.toolName}`);
       broadcastToSession(s, {
         type: "tool",
         sessionId,
@@ -424,6 +470,10 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
         event.result?.content
           ?.map((c: any) => (c.type === "text" ? c.text : ""))
           .join("") ?? "";
+      slog(
+        s,
+        `🔧 tool_end ${event.toolName} ${event.isError ? "ERROR" : "ok"} (${text.length} chars)`,
+      );
       broadcastToSession(s, {
         type: "tool",
         sessionId,
@@ -446,16 +496,42 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
       break;
 
     case "compaction_start":
+      slog(s, "📦 compaction_start");
       broadcastToSession(s, { type: "compaction", sessionId, phase: "start" });
       break;
 
     case "compaction_end":
+      slog(s, "📦 compaction_end");
       broadcastToSession(s, {
         type: "compaction",
         sessionId,
         phase: "end",
         summary: event.result?.summary,
       });
+      break;
+
+    case "auto_retry_start":
+      slog(
+        s,
+        `⟳ auto_retry attempt ${event.attempt}/${event.maxAttempts} in ${Math.round(event.delayMs / 1000)}s — ${event.errorMessage}`,
+      );
+      broadcastToSession(s, {
+        type: "error",
+        message: `Retry ${event.attempt}/${event.maxAttempts} in ${Math.round(event.delayMs / 1000)}s: ${event.errorMessage}`,
+      });
+      break;
+
+    case "auto_retry_end":
+      slog(
+        s,
+        `⟳ auto_retry ${event.success ? "succeeded" : "failed"} after ${event.attempt} attempts${event.finalError ? ` — ${event.finalError}` : ""}`,
+      );
+      if (!event.success) {
+        broadcastToSession(s, {
+          type: "error",
+          message: `Auto-retry gave up after ${event.attempt} attempts${event.finalError ? `: ${event.finalError}` : ""}`,
+        });
+      }
       break;
   }
 }
@@ -545,11 +621,18 @@ async function handlePrompt(
     sendToClient(client, { type: "error", message: "Session not found" });
     return;
   }
+  slog(
+    s,
+    `📨 prompt from ${client.clientId} (${message.length} chars${streamingBehavior ? `, ${streamingBehavior}` : ""}): "${preview(message)}"`,
+  );
+  const t0 = Date.now();
   try {
     if (!s.agentSession) await takeOwnership(s);
+    slog(s, `→ calling AgentSession.prompt() (isStreaming=${s.agentSession!.isStreaming})`);
     await s.agentSession!.prompt(message, { streamingBehavior });
+    slog(s, `✓ prompt() returned after ${Date.now() - t0}ms`);
   } catch (err) {
-    console.error(`[session ${s.sessionId}] prompt error:`, err);
+    slog(s, `✗ prompt failed after ${Date.now() - t0}ms:`, err);
     sendToClient(client, {
       type: "error",
       message: err instanceof Error ? err.message : "Failed to send prompt",
@@ -611,7 +694,13 @@ async function handleNewSession(client: Client): Promise<void> {
       agentUnsubscribe: null,
       driver: "self",
     };
-    s.agentUnsubscribe = session.subscribe((event) => handleAgentEvent(s, event));
+    s.agentUnsubscribe = session.subscribe((event) => {
+      try {
+        handleAgentEvent(s, event);
+      } catch (err) {
+        slog(s, `✗ handleAgentEvent threw for event=${event.type}:`, err);
+      }
+    });
     try {
       const stat = await fs.promises.stat(sessionFile);
       s.fileSize = stat.size;
@@ -721,6 +810,7 @@ wss.on("connection", (ws: Client) => {
       ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
       return;
     }
+    console.log(`${ts()} [${ws.clientId}] ◀ ${command.type}`);
     try {
       await handleCommand(ws, command);
     } catch (err) {
