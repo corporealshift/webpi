@@ -1,0 +1,33 @@
+{
+  "name": "web-pi",
+  "version": "1.0.0",
+  "description": "Remote control for pi coding agent via websockets",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "websocket",
+    "remote-control"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.75.5",
+    "@earendil-works/pi-coding-agent": "^0.75.5",
+    "express": "^5.2.1",
+    "typebox": "^1.1.38",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.3",
+    "typescript": "^5.9.3"
+  }
+}

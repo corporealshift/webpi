@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>web-pi</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58d0ff;
+      --accent-dim: #1f6feb;
+      --green: #3fb950;
+      --orange: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --user-msg: #1a2332;
+      --assistant-msg: #161b22;
+      --tool-bg: #1c1c2e;
+      --thinking-bg: #1a1a2e;
+      --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────── */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-size: 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-title .logo {
+      width: 28px;
+      height: 28px;
+      background: var(--accent-dim);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-icon {
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: all 0.15s;
+    }
+
+    .btn-icon:hover { background: var(--border); }
+    .btn-icon:active { transform: scale(0.95); }
+
+    .main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ─── Session List ───────────────────────────────────────── */
+    .session-list {
+      width: 280px;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      transition: transform 0.2s;
+    }
+
+    .session-list-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .session-list-header h3 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    .btn-new {
+      padding: 4px 10px;
+      background: var(--accent-dim);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-new:hover { opacity: 0.85; }
+    .btn-new:active { transform: scale(0.95); }
+
+    .session-items {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .session-item {
+      padding: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 4px;
+      transition: all 0.15s;
+      border: 1px solid transparent;
+    }
+
+    .session-item:hover { background: var(--bg-tertiary); }
+    .session-item.active {
+      background: var(--bg-tertiary);
+      border-color: var(--accent-dim);
+    }
+
+    .session-item-name {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+
+    .session-item-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      gap: 8px;
+    }
+
+    .session-item-status {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+
+    .session-item-status.streaming { background: var(--green); animation: pulse 1.5s infinite; }
+    .session-item-status.idle { background: var(--text-muted); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ─── Chat Area ──────────────────────────────────────────── */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .chat-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .chat-header-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .chat-header-name {
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-header-status {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.streaming { background: var(--green); animation: pulse 1.5s infinite; }
+    .status-dot.idle { background: var(--text-muted); }
+
+    .driver-pill {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .driver-pill.self { background: var(--accent-dim); color: white; }
+    .driver-pill.external { background: var(--orange); color: white; }
+    .driver-pill.observer { background: var(--bg-tertiary); color: var(--text-muted); }
+
+    .btn-release {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: var(--bg-tertiary);
+      color: var(--text);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .btn-release:hover { background: var(--border); }
+
+    .chat-header-model {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-tertiary);
+      padding: 2px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      scroll-behavior: smooth;
+    }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      gap: 12px;
+      padding: 32px;
+      text-align: center;
+    }
+
+    .empty-state .icon { font-size: 48px; opacity: 0.3; }
+    .empty-state p { font-size: 14px; line-height: 1.5; }
+
+    /* ─── Message Types ──────────────────────────────────────── */
+    .message {
+      max-width: 85%;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user {
+      align-self: flex-end;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+    }
+
+    .message-bubble {
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      word-wrap: break-word;
+    }
+
+    .message.user .message-bubble {
+      background: var(--accent-dim);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant .message-bubble {
+      background: var(--assistant-msg);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message-text {
+      white-space: pre-wrap;
+    }
+
+    .message-text code {
+      font-family: var(--font-mono);
+      background: var(--bg-tertiary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .message-text pre {
+      background: var(--bg-tertiary);
+      padding: 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 8px 0;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .message-text pre code {
+      background: none;
+      padding: 0;
+    }
+
+    /* ─── Thinking ───────────────────────────────────────────── */
+    .thinking-block {
+      background: var(--thinking-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .thinking-header {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--purple);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .thinking-content {
+      white-space: pre-wrap;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    /* ─── Tool Calls ─────────────────────────────────────────── */
+    .tool-call {
+      background: var(--tool-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 4px 0;
+    }
+
+    .tool-header {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .tool-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+
+    .tool-icon {
+      font-size: 14px;
+    }
+
+    .tool-status {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    .tool-status.pending { background: var(--bg-tertiary); color: var(--text-muted); }
+    .tool-status.running { background: #1a3a5c; color: var(--accent); }
+    .tool-status.done { background: #1a3a2a; color: var(--green); }
+    .tool-status.error { background: #3a1a1a; color: var(--red); }
+
+    .tool-body {
+      padding: 0 12px 10px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .tool-body.collapsed {
+      display: none;
+    }
+
+    .tool-toggle {
+      color: var(--text-muted);
+      font-size: 12px;
+      transition: transform 0.2s;
+    }
+
+    .tool-toggle.open { transform: rotate(180deg); }
+
+    /* ─── Input Area ─────────────────────────────────────────── */
+    .input-area {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+    }
+
+    .input-wrapper {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    .input-box {
+      flex: 1;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-size: 14px;
+      font-family: var(--font-sans);
+      resize: none;
+      min-height: 44px;
+      max-height: 150px;
+      line-height: 1.4;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .input-box:focus { border-color: var(--accent-dim); }
+    .input-box::placeholder { color: var(--text-muted); }
+
+    .btn-send {
+      width: 44px;
+      height: 44px;
+      background: var(--accent-dim);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+
+    .btn-send:hover { opacity: 0.85; }
+    .btn-send:active { transform: scale(0.92); }
+    .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-send.abort-btn {
+      background: var(--red);
+    }
+
+    /* ─── Queue Indicator ────────────────────────────────────── */
+    .queue-bar {
+      padding: 6px 16px;
+      background: var(--bg-tertiary);
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+      display: none;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .queue-bar.visible { display: flex; }
+
+    /* ─── Mobile ─────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .session-list {
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 100;
+        width: 85vw;
+        max-width: 320px;
+        transform: translateX(-100%);
+      }
+
+      .session-list.open { transform: translateX(0); }
+
+      .overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 99;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+      }
+
+      .overlay.visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .message { max-width: 95%; }
+    }
+
+    /* ─── Scrollbar ──────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+    /* ─── Name editing ───────────────────────────────────────── */
+    .name-edit {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--accent-dim);
+      border-radius: 6px;
+      padding: 4px 8px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      width: 100%;
+      outline: none;
+    }
+
+    /* ─── Toast notifications ────────────────────────────────── */
+    .toast-container {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      animation: slideIn 0.2s ease;
+      max-width: 300px;
+    }
+
+    .toast.info { background: var(--accent-dim); color: white; }
+    .toast.warning { background: var(--orange); color: white; }
+    .toast.error { background: var(--red); color: white; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ─── Streaming cursor ───────────────────────────────────── */
+    .streaming-cursor::after {
+      content: '▋';
+      animation: blink 1s step-end infinite;
+      color: var(--accent);
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div class="header-title">
+        <div class="logo">π</div>
+        <span>web-pi</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn-icon" id="btn-menu" title="Sessions">☰</button>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="overlay" id="overlay"></div>
+      <div class="session-list" id="session-list">
+        <div class="session-list-header">
+          <h3>Sessions</h3>
+          <button class="btn-new" id="btn-new">+ New</button>
+        </div>
+        <div class="session-items" id="session-items"></div>
+      </div>
+
+      <div class="chat-area">
+        <div class="chat-header" id="chat-header" style="display:none;">
+          <button class="btn-icon" id="btn-menu-mobile" title="Sessions" style="display:none;">☰</button>
+          <div class="chat-header-info">
+            <div class="chat-header-name" id="chat-name"></div>
+            <div class="chat-header-status">
+              <span class="status-dot idle" id="status-dot"></span>
+              <span id="status-text">Idle</span>
+            </div>
+          </div>
+          <span class="driver-pill observer" id="driver-pill" title="Who is driving this session">idle</span>
+          <button class="btn-release" id="btn-release" style="display:none;" title="Release ownership so pi-CLI can drive">Release</button>
+          <span class="chat-header-model" id="chat-model"></span>
+        </div>
+
+        <div class="messages" id="messages">
+          <div class="empty-state" id="empty-state">
+            <div class="icon">🤖</div>
+            <p>Select a session to start chatting,<br>or create a new one.</p>
+          </div>
+        </div>
+
+        <div class="queue-bar" id="queue-bar">
+          <span>⏳</span>
+          <span id="queue-text"></span>
+        </div>
+
+        <div class="input-area" id="input-area" style="display:none;">
+          <div class="input-wrapper">
+            <textarea class="input-box" id="input-box" placeholder="Ask pi anything..." rows="1"></textarea>
+            <button class="btn-send" id="btn-send">➤</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    // ─── State ──────────────────────────────────────────────────────────────────
+    const state = {
+      ws: null,
+      sessions: [],
+      activeSession: null,
+      clientSessionId: null, // Set by server in session_update; used to validate active session
+      messages: [],
+      isStreaming: false,
+      isConnecting: false,
+      currentStreamingMsg: null,
+      driver: 'none', // 'none' | 'external' | 'self' — who is writing to the current session
+    };
+
+    // ─── DOM refs ───────────────────────────────────────────────────────────────
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    const sessionListEl = $('#session-list');
+    const sessionItemsEl = $('#session-items');
+    const overlayEl = $('#overlay');
+    const chatHeaderEl = $('#chat-header');
+    const chatNameEl = $('#chat-name');
+    const chatModelEl = $('#chat-model');
+    const statusDotEl = $('#status-dot');
+    const statusTextEl = $('#status-text');
+    const driverPillEl = $('#driver-pill');
+    const btnReleaseEl = $('#btn-release');
+    const messagesEl = $('#messages');
+    const emptyStateEl = $('#empty-state');
+    const inputAreaEl = $('#input-area');
+    const inputBoxEl = $('#input-box');
+    const btnSendEl = $('#btn-send');
+    const btnMenuEl = $('#btn-menu');
+    const btnMenuMobileEl = $('#btn-menu-mobile');
+    const btnNewEl = $('#btn-new');
+    const queueBarEl = $('#queue-bar');
+    const queueTextEl = $('#queue-text');
+    const toastContainerEl = $('#toast-container');
+
+    // ─── WebSocket ──────────────────────────────────────────────────────────────
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}`);
+
+      ws.onopen = () => {
+        console.log('[ws] connected, readyState:', ws.readyState);
+        state.ws = ws;
+        state.isConnecting = false;
+        listSessions();
+      };
+
+      ws.onclose = (e) => {
+        console.log('[ws] closed:', e.code, e.reason);
+        state.ws = null;
+        setTimeout(connect, 2000);
+      };
+
+      ws.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        console.log('[ws] received:', event.type, event);
+        handleServerEvent(event);
+      };
+
+      ws.onerror = (e) => {
+        console.error('[ws] error event:', e);
+        showToast('Connection error', 'error');
+      };
+    }
+
+    function send(data) {
+      if (!state.ws) {
+        console.log('[send] NO ws connection!');
+        return;
+      }
+      const readyStates = { '0': 'CONNECTING', '1': 'OPEN', '2': 'CLOSING', '3': 'CLOSED' };
+      console.log('[send] ws readyState:', readyStates[state.ws.readyState], 'data:', data.type);
+      if (state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify(data));
+      } else {
+        console.log('[send] ws not open, reconnecting...');
+        connect();
+      }
+    }
+
+    // ─── Event handling ─────────────────────────────────────────────────────────
+    function handleServerEvent(event) {
+      switch (event.type) {
+        case 'session_list':
+          state.sessions = event.sessions;
+          renderSessionList();
+          break;
+
+        case 'session_update':
+          console.log('[session_update]', event);
+          console.log('[session_update] state.activeSession before:', state.activeSession);
+          console.log('[session_update] state.clientSessionId before:', state.clientSessionId);
+          console.log('[session_update] event.sessionId:', event.sessionId);
+          console.log('[session_update] event.sessionFile:', event.sessionFile);
+          console.log('[session_update] state.sessions.length:', state.sessions.length);
+          // Server disconnected this client's session
+          if (!event.sessionId) {
+            console.log('[session_update] server disconnected session');
+            state.clientSessionId = null;
+            state.activeSession = null;
+            state.messages = [];
+            messagesEl.innerHTML = '';
+            messagesEl.appendChild(emptyStateEl);
+            emptyStateEl.style.display = 'flex';
+            chatHeaderEl.style.display = 'none';
+            inputAreaEl.style.display = 'none';
+            renderSessionList();
+            return;
+          }
+          // Handle new session creation or reconnection (no clientSessionId yet)
+          if (!state.clientSessionId) {
+            console.log('[session_update] creating new session');
+            let newSession = state.sessions.find(s => s.id === event.sessionId);
+            // Fallback: try matching by sessionFile
+            if (!newSession && event.sessionFile) {
+              newSession = state.sessions.find(s => s.file === event.sessionFile);
+            }
+            if (!newSession) {
+              console.log('[session_update] session not found, creating from event');
+              // Session created on server but not in our list yet
+              newSession = {
+                id: event.sessionId,
+                file: event.sessionFile || '',
+                name: event.sessionName || 'New session',
+                entryCount: event.messageCount || 0,
+                timestamp: Date.now(),
+              };
+              state.sessions.push(newSession);
+            } else {
+              console.log('[session_update] found existing session by id or file');
+            }
+            console.log('[session_update] setting activeSession to:', newSession);
+            state.activeSession = newSession;
+            state.messages = [];
+            messagesEl.innerHTML = '';
+            chatHeaderEl.style.display = 'flex';
+            inputAreaEl.style.display = 'block';
+            chatNameEl.textContent = event.sessionName || 'New session';
+            emptyStateEl.style.display = 'none';
+            if (event.driver !== undefined) state.driver = event.driver;
+            if (event.isStreaming !== undefined) state.isStreaming = !!event.isStreaming;
+            renderSessionList();
+            updateStatusUI();
+            // Set clientSessionId from server response (confirms active session)
+            state.clientSessionId = event.sessionId;
+            return;
+          }
+          // Update clientSessionId from server response (confirms active session)
+          state.clientSessionId = event.sessionId;
+          // Handle existing active session updates
+          if (state.clientSessionId === event.sessionId) {
+            if (event.isStreaming !== undefined) state.isStreaming = !!event.isStreaming;
+            if (event.driver !== undefined) state.driver = event.driver;
+            if (event.sessionName !== undefined) {
+              chatNameEl.textContent = event.sessionName || 'New session';
+            }
+            updateStatusUI();
+            if (event.messageCount !== undefined) {
+              // Update session list
+              const s = state.sessions.find(s => s.id === event.sessionId);
+              if (s) s.entryCount = event.messageCount;
+              renderSessionList();
+            }
+          }
+          break;
+
+        case 'message':
+          console.log('[message] received, sessionId=', event.sessionId, 'clientSessionId=', state.clientSessionId, 'match=', state.clientSessionId === event.sessionId);
+          if (state.clientSessionId === event.sessionId) {
+            // Use the finalized flag from the server to determine behavior
+            const isFinalized = event.message.finalized === true;
+            // Check if this is a continuation of streaming (only for non-finalized messages)
+            const lastMsg = state.messages[state.messages.length - 1];
+            if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.finalized && !isFinalized) {
+              // Append to existing streaming message
+              lastMsg.content += typeof event.message.content === 'string' ? event.message.content : '';
+              lastMsg.timestamp = event.message.timestamp;
+              renderLastMessage();
+            } else {
+              state.messages.push({ ...event.message, finalized: isFinalized });
+              renderMessage(event.message);
+            }
+          }
+          break;
+
+        case 'streaming':
+          console.log('[streaming] received, sessionId=', event.sessionId, 'clientSessionId=', state.clientSessionId, 'match=', state.clientSessionId === event.sessionId);
+          if (state.clientSessionId === event.sessionId) {
+            const lastMsg = state.messages[state.messages.length - 1];
+            if (lastMsg && !lastMsg.finalized) {
+              lastMsg.content += event.delta;
+              renderLastMessage();
+            }
+          }
+          break;
+
+        case 'tool':
+          console.log('[tool] received, sessionId=', event.sessionId, 'clientSessionId=', state.clientSessionId, 'match=', state.clientSessionId === event.sessionId);
+          if (state.clientSessionId === event.sessionId) {
+            renderToolEvent(event);
+          }
+          break;
+
+        case 'queue_update':
+          console.log('[queue_update] received, sessionId=', event.sessionId, 'clientSessionId=', state.clientSessionId, 'match=', state.clientSessionId === event.sessionId);
+          if (state.clientSessionId === event.sessionId) {
+            const hasQueue = event.steering.length > 0 || event.followUp.length > 0;
+            queueBarEl.classList.toggle('visible', hasQueue);
+            const parts = [];
+            if (event.steering.length > 0) parts.push(`${event.steering.length} steering`);
+            if (event.followUp.length > 0) parts.push(`${event.followUp.length} follow-up`);
+            queueTextEl.textContent = parts.join(', ');
+          }
+          break;
+
+        case 'compaction':
+          if (state.clientSessionId && event.phase === 'start') {
+            showToast('Compacting context...', 'info');
+          }
+          break;
+
+        case 'error':
+          showToast(event.message, 'error');
+          break;
+
+        case 'state':
+          if (event.data) {
+            if (event.data.model) {
+              chatModelEl.textContent = event.data.model.name || event.data.model.id;
+            }
+          }
+          break;
+      }
+    }
+
+    // ─── Session list ───────────────────────────────────────────────────────────
+    function listSessions() {
+      send({ type: 'list_sessions' });
+    }
+
+    function renderSessionList() {
+      sessionItemsEl.innerHTML = '';
+      for (const s of state.sessions) {
+        const div = document.createElement('div');
+        div.className = 'session-item' + (state.activeSession?.id === s.id ? ' active' : '');
+        const time = new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const name = s.name || 'New session';
+        div.innerHTML = `
+          <div class="session-item-name">${escapeHtml(name)}</div>
+          <div class="session-item-meta">
+            <span><span class="session-item-status ${state.activeSession?.id === s.id && state.isStreaming ? 'streaming' : 'idle'}"></span>${state.activeSession?.id === s.id && state.isStreaming ? 'working' : 'idle'}</span>
+            <span>${time}</span>
+          </div>
+        `;
+        div.addEventListener('click', () => connectToSession(s));
+        sessionItemsEl.appendChild(div);
+      }
+    }
+
+    function connectToSession(session) {
+      // Set activeSession for UI purposes; the real guard is clientSessionId
+      // which is set by the server's session_update response.
+      state.activeSession = session;
+      state.messages = [];
+      messagesEl.innerHTML = '';
+      chatHeaderEl.style.display = 'flex';
+      inputAreaEl.style.display = 'block';
+      chatNameEl.textContent = session.name || 'New session';
+      emptyStateEl.style.display = 'none';
+      renderSessionList();
+      closeMobileMenu();
+      send({ type: 'connect_session', sessionFile: session.file });
+    }
+
+    // ─── Messages ───────────────────────────────────────────────────────────────
+    function renderMessage(msg) {
+      console.log('[renderMessage]', msg.role, msg.finalized ? '(finalized)' : '(streaming)');
+      const div = document.createElement('div');
+      div.className = `message ${msg.role}`;
+      div.dataset.role = msg.role;
+
+      if (msg.role === 'user') {
+        div.innerHTML = `<div class="message-bubble"><div class="message-text">${escapeHtml(msg.content)}</div></div>`;
+      } else {
+        div.innerHTML = `<div class="message-bubble"></div>`;
+        appendToAssistant(div, msg);
+      }
+
+      messagesEl.appendChild(div);
+      scrollToBottom();
+    }
+
+    function renderLastMessage() {
+      const lastMsg = state.messages[state.messages.length - 1];
+      if (!lastMsg || lastMsg.role !== 'assistant') return;
+      const msgs = messagesEl.querySelectorAll('.message.assistant');
+      const lastBubble = msgs[msgs.length - 1]?.querySelector('.message-bubble');
+      if (lastBubble) {
+        lastBubble.innerHTML = '';
+        appendToAssistant(lastBubble.parentElement, lastMsg);
+        scrollToBottom();
+      }
+    }
+
+    function appendToAssistant(msgEl, msg) {
+      const bubble = msgEl.querySelector('.message-bubble') || msgEl;
+      const content = msg.content;
+
+      if (typeof content === 'string') {
+        // Check for thinking blocks
+        const thinkingMatch = content.match(/<thinking>([\s\S]*?)<\/thinking>/);
+        if (thinkingMatch) {
+          const thinkingDiv = document.createElement('div');
+          thinkingDiv.className = 'thinking-block';
+          thinkingDiv.innerHTML = `
+            <div class="thinking-header">🧠 Thinking</div>
+            <div class="thinking-content">${escapeHtml(thinkingMatch[1])}</div>
+          `;
+          bubble.appendChild(thinkingDiv);
+        }
+
+        const textContent = content
+          .replace(/<thinking>[\s\S]*?<\/thinking>/g, '')
+          .trim();
+
+        let textEl = null;
+        if (textContent) {
+          const textDiv = document.createElement('div');
+          textDiv.className = 'message-text';
+          textDiv.innerHTML = formatText(textContent);
+          bubble.appendChild(textDiv);
+          textEl = textDiv;
+        }
+
+        if (state.isStreaming) {
+          const target = textEl || bubble.lastElementChild;
+          if (target) target.classList.add('streaming-cursor');
+        }
+      }
+    }
+
+    function formatText(text) {
+      // Basic markdown formatting
+      text = escapeHtml(text);
+      // Code blocks
+      text = text.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+      // Inline code
+      text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Bold
+      text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Italic
+      text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      // Line breaks
+      text = text.replace(/\n/g, '<br>');
+      return text;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ─── Tool events ────────────────────────────────────────────────────────────
+    const toolElements = new Map();
+
+    function renderToolEvent(event) {
+      const key = event.toolCallId;
+
+      if (event.status === 'start') {
+        const toolNames = {
+          read: '📄', bash: '⚡', edit: '✏️', write: '💾',
+          grep: '🔍', find: '📁', ls: '📋'
+        };
+        const icon = toolNames[event.toolName] || '🔧';
+
+        const div = document.createElement('div');
+        div.className = 'tool-call';
+        div.dataset.toolId = key;
+        div.innerHTML = `
+          <div class="tool-header">
+            <div class="tool-header-left">
+              <span class="tool-icon">${icon}</span>
+              <span>${event.toolName}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="tool-status pending">pending</span>
+              <span class="tool-toggle">▼</span>
+            </div>
+          </div>
+          <div class="tool-body collapsed"></div>
+        `;
+        messagesEl.appendChild(div);
+
+        // Toggle collapse
+        div.querySelector('.tool-header').addEventListener('click', () => {
+          const body = div.querySelector('.tool-body');
+          const toggle = div.querySelector('.tool-toggle');
+          body.classList.toggle('collapsed');
+          toggle.classList.toggle('open');
+        });
+
+        toolElements.set(key, div);
+        scrollToBottom();
+      }
+
+      const el = toolElements.get(key);
+      if (!el) return;
+
+      const statusEl = el.querySelector('.tool-status');
+      const bodyEl = el.querySelector('.tool-body');
+
+      if (event.status === 'running' || event.status === 'update') {
+        statusEl.className = 'tool-status running';
+        statusEl.textContent = 'running';
+        if (event.result) bodyEl.textContent = event.result;
+      }
+
+      if (event.status === 'end') {
+        statusEl.className = `tool-status ${event.isError ? 'error' : 'done'}`;
+        statusEl.textContent = event.isError ? 'error' : 'done';
+        if (event.result) bodyEl.textContent = event.result;
+      }
+    }
+
+    // ─── Status UI ──────────────────────────────────────────────────────────────
+    function updateStatusUI() {
+      statusDotEl.className = `status-dot ${state.isStreaming ? 'streaming' : 'idle'}`;
+      statusTextEl.textContent = state.isStreaming ? 'Working...' : 'Idle';
+      btnSendEl.textContent = state.isStreaming ? '■' : '➤';
+      btnSendEl.classList.toggle('abort-btn', state.isStreaming);
+      inputBoxEl.disabled = state.isStreaming;
+
+      const driver = state.driver || 'none';
+      let label, cls;
+      if (driver === 'self') { label = 'web driving'; cls = 'self'; }
+      else if (driver === 'external') { label = 'pi-cli driving'; cls = 'external'; }
+      else { label = 'observing'; cls = 'observer'; }
+      driverPillEl.textContent = label;
+      driverPillEl.className = `driver-pill ${cls}`;
+      btnReleaseEl.style.display = driver === 'self' && !state.isStreaming ? 'inline-block' : 'none';
+    }
+
+    btnReleaseEl.addEventListener('click', () => {
+      send({ type: 'release_session' });
+    });
+
+    // ─── Input ──────────────────────────────────────────────────────────────────
+    inputBoxEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Auto-resize textarea
+    inputBoxEl.addEventListener('input', () => {
+      inputBoxEl.style.height = 'auto';
+      inputBoxEl.style.height = Math.min(inputBoxEl.scrollHeight, 150) + 'px';
+    });
+
+    btnSendEl.addEventListener('click', () => {
+      if (state.isStreaming) {
+        send({ type: 'abort' });
+      } else {
+        sendMessage();
+      }
+    });
+
+    function sendMessage() {
+      const text = inputBoxEl.value.trim();
+      console.log('[sendMessage] text=', text ? text.substring(0, 50) : '(empty)', 'clientSessionId=', state.clientSessionId);
+      if (!text) {
+        console.log('[sendMessage] no text');
+        return;
+      }
+      if (!state.clientSessionId) {
+        console.log('[sendMessage] NO ACTIVE SESSION! clientSessionId is null/undefined');
+        showToast('No active session. Create or select a session first.', 'error');
+        return;
+      }
+
+      inputBoxEl.value = '';
+      inputBoxEl.style.height = 'auto';
+
+      send({ type: 'prompt', message: text });
+    }
+
+    // ─── Mobile menu ────────────────────────────────────────────────────────────
+    function openMobileMenu() {
+      sessionListEl.classList.add('open');
+      overlayEl.classList.add('visible');
+    }
+
+    function closeMobileMenu() {
+      sessionListEl.classList.remove('open');
+      overlayEl.classList.remove('visible');
+    }
+
+    btnMenuEl.addEventListener('click', openMobileMenu);
+    btnMenuMobileEl.addEventListener('click', openMobileMenu);
+    overlayEl.addEventListener('click', closeMobileMenu);
+
+    // Show mobile menu button when needed
+    function updateMobileMenu() {
+      const show = window.innerWidth <= 768;
+      btnMenuMobileEl.style.display = show ? 'flex' : 'none';
+    }
+    window.addEventListener('resize', updateMobileMenu);
+    updateMobileMenu();
+
+    // ─── New session ────────────────────────────────────────────────────────────
+    btnNewEl.addEventListener('click', () => {
+      console.log('[New] Sending new_session request');
+      send({ type: 'new_session' });
+      // Clear UI immediately but keep state.clientSessionId null
+      // The session_update handler will set it when server responds
+      state.clientSessionId = null;
+      state.activeSession = null;
+      state.messages = [];
+      messagesEl.innerHTML = '';
+      messagesEl.appendChild(emptyStateEl);
+      emptyStateEl.style.display = 'flex';
+      chatHeaderEl.style.display = 'none';
+      inputAreaEl.style.display = 'none';
+      closeMobileMenu();
+    });
+
+    // ─── Toast ──────────────────────────────────────────────────────────────────
+    function showToast(message, level = 'info') {
+      const toast = document.createElement('div');
+      toast.className = `toast ${level}`;
+      toast.textContent = message;
+      toastContainerEl.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    // ─── Scroll ─────────────────────────────────────────────────────────────────
+    function scrollToBottom() {
+      requestAnimationFrame(() => {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      });
+    }
+
+    // ─── Init ───────────────────────────────────────────────────────────────────
+    console.log('[init] Page loaded, connecting...');
+    connect();
+  </script>
+</body>
+</html>
