@@ -36,6 +36,7 @@ interface SessionState {
   sessionFile: string;
   sessionId: string;
   cwd: string;
+  sessionName: string | undefined;
   clients: Set<Client>;
   // File-watch state
   watcher: fs.FSWatcher | null;
@@ -159,7 +160,7 @@ function broadcastDriverUpdate(s: SessionState, extra: Partial<ServerEvent> = {}
 
 async function readSessionHeader(
   sessionFile: string,
-): Promise<{ sessionId: string; cwd: string }> {
+): Promise<{ sessionId: string; cwd: string; name?: string }> {
   const data = await fs.promises.readFile(sessionFile, "utf8");
   const firstLine = data.split("\n", 1)[0];
   let header: any = {};
@@ -168,16 +169,33 @@ async function readSessionHeader(
   } catch {
     // fall through with defaults
   }
+  // Extract session name from latest session_info entry
+  let name: string | undefined;
+  const lines = data.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim();
+    if (!line) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type === "session_info") {
+        name = entry.name?.trim() || undefined;
+        break;
+      }
+    } catch {
+      // skip malformed
+    }
+  }
   return {
     sessionId: header.id ?? "",
     cwd: header.cwd ?? process.cwd(),
+    name,
   };
 }
 
 async function getOrCreateSessionState(sessionFile: string): Promise<SessionState> {
   const existing = sessions.get(sessionFile);
   if (existing) return existing;
-  const { sessionId, cwd } = await readSessionHeader(sessionFile);
+  const { sessionId, cwd, name } = await readSessionHeader(sessionFile);
   const stat = await fs.promises.stat(sessionFile);
   const data = await fs.promises.readFile(sessionFile, "utf8");
   const { entries, leftover } = parseJsonlChunk(data);
@@ -185,6 +203,7 @@ async function getOrCreateSessionState(sessionFile: string): Promise<SessionStat
     sessionFile,
     sessionId,
     cwd,
+    sessionName: name,
     clients: new Set(),
     watcher: null,
     fileSize: stat.size,
@@ -204,7 +223,7 @@ async function getOrCreateSessionState(sessionFile: string): Promise<SessionStat
   return s;
 }
 
-function startWatcher(s: SessionState): fs.FSWatcher {
+function startWatcher(s: SessionState): fs.FSWatcher | null {
   let pending = false;
   const trigger = () => {
     if (pending) return;
@@ -216,8 +235,13 @@ function startWatcher(s: SessionState): fs.FSWatcher {
       );
     }, 30);
   };
-  const w = fs.watch(s.sessionFile, { persistent: false }, () => trigger());
-  return w;
+  try {
+    const w = fs.watch(s.sessionFile, { persistent: false }, () => trigger());
+    return w;
+  } catch {
+    // File doesn't exist yet — watcher will be started after first write
+    return null;
+  }
 }
 
 async function readNewEntries(s: SessionState): Promise<void> {
@@ -540,14 +564,23 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
 
 async function listSessions(client: Client): Promise<void> {
   try {
-    const list = await SessionManager.list(process.cwd());
-    const out: SessionInfo[] = list.map((s: any) => ({
-      file: s.path ?? s.file ?? "",
-      id: s.id ?? "",
-      name: s.name,
-      entryCount: s.messageCount ?? s.entryCount ?? 0,
-      timestamp: s.modified ? new Date(s.modified).getTime() : (s.timestamp ?? 0),
-    }));
+    const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - THREE_DAYS_MS;
+    const list = await SessionManager.listAll();
+    const out: SessionInfo[] = list
+      .filter((s: any) => {
+        const modTime = s.modified instanceof Date ? s.modified.getTime() : new Date(s.modified).getTime();
+        return modTime >= cutoff;
+      })
+      .map((s: any) => ({
+        file: s.path ?? "",
+        id: s.id ?? "",
+        name: s.name,
+        cwd: s.cwd ?? "",
+        firstMessage: s.firstMessage,
+        entryCount: s.messageCount ?? 0,
+        timestamp: s.modified instanceof Date ? s.modified.getTime() : new Date(s.modified).getTime(),
+      }));
     sendToClient(client, { type: "session_list", sessions: out });
   } catch (err) {
     sendToClient(client, {
@@ -566,6 +599,7 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
     type: "session_update",
     sessionId: s.sessionId,
     sessionFile: s.sessionFile,
+    sessionName: s.sessionName,
     isStreaming: !!s.agentSession?.isStreaming,
     driver: s.driver,
     messageCount: s.knownEntryIds.size,
@@ -684,6 +718,7 @@ async function handleNewSession(client: Client): Promise<void> {
       sessionFile,
       sessionId: session.sessionId,
       cwd,
+      sessionName: undefined,
       clients: new Set([client]),
       watcher: null,
       fileSize: 0,

@@ -816,7 +816,7 @@
               newSession = {
                 id: event.sessionId,
                 file: event.sessionFile || '',
-                name: event.sessionName || 'New session',
+                name: event.sessionName,
                 entryCount: event.messageCount || 0,
                 timestamp: Date.now(),
               };
@@ -847,7 +847,7 @@
             if (event.isStreaming !== undefined) state.isStreaming = !!event.isStreaming;
             if (event.driver !== undefined) state.driver = event.driver;
             if (event.sessionName !== undefined) {
-              chatNameEl.textContent = event.sessionName || 'New session';
+              chatNameEl.textContent = event.sessionName || chatNameEl.textContent;
             }
             updateStatusUI();
             if (event.messageCount !== undefined) {
@@ -941,11 +941,19 @@
         const div = document.createElement('div');
         div.className = 'session-item' + (state.activeSession?.id === s.id ? ' active' : '');
         const time = new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const name = s.name || 'New session';
+        let displayName = s.name;
+        if (!displayName && s.firstMessage) {
+          // Use first user message as fallback name (truncated)
+          displayName = s.firstMessage.replace(/\s+/g, ' ').trim().slice(0, 50);
+          if (s.firstMessage.length > 50) displayName += '…';
+        }
+        if (!displayName) displayName = 'New session';
+        const cwdShort = s.cwd ? s.cwd.split(/[\\/]/).pop() || s.cwd : '';
         div.innerHTML = `
-          <div class="session-item-name">${escapeHtml(name)}</div>
+          <div class="session-item-name">${escapeHtml(displayName)}</div>
           <div class="session-item-meta">
             <span><span class="session-item-status ${state.activeSession?.id === s.id && state.isStreaming ? 'streaming' : 'idle'}"></span>${state.activeSession?.id === s.id && state.isStreaming ? 'working' : 'idle'}</span>
+            <span>${cwdShort}</span>
             <span>${time}</span>
           </div>
         `;
@@ -962,7 +970,12 @@
       messagesEl.innerHTML = '';
       chatHeaderEl.style.display = 'flex';
       inputAreaEl.style.display = 'block';
-      chatNameEl.textContent = session.name || 'New session';
+      let displayName = session.name;
+      if (!displayName && session.firstMessage) {
+        displayName = session.firstMessage.replace(/\s+/g, ' ').trim().slice(0, 60);
+        if (session.firstMessage.length > 60) displayName += '…';
+      }
+      chatNameEl.textContent = displayName || 'New session';
       emptyStateEl.style.display = 'none';
       renderSessionList();
       closeMobileMenu();

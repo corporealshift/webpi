@@ -205,6 +205,8 @@ export interface SessionInfo {
   file: string;
   id: string;
   name?: string;
+  cwd: string;
+  firstMessage?: string;
   entryCount: number;
   timestamp: number;
 }
