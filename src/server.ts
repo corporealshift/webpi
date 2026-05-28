@@ -262,7 +262,7 @@ function broadcastDriverUpdate(s: SessionState, extra: Partial<ServerEvent> = {}
     type: "session_update",
     sessionId: s.sessionId,
     sessionFile: s.sessionFile,
-    isStreaming: !!s.agentSession?.isStreaming,
+    isStreaming: computeActivity(s),
     driver: s.driver,
     messageCount: s.knownEntryIds.size,
     ...extra,
@@ -419,6 +419,8 @@ async function readNewEntries(s: SessionState): Promise<void> {
   }
   // Reset idle timer — flip back to "none" after quiet period
   if (s.externalIdleTimer) clearTimeout(s.externalIdleTimer);
+  // Broadcast "working" immediately when timer is reset (new write detected)
+  broadcastDriverUpdate(s);
   s.externalIdleTimer = setTimeout(() => {
     if (s.driver === "external") {
       s.driver = "none";
@@ -498,12 +500,7 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
   switch (event.type) {
     case "agent_start":
       slog(s, "▶ agent_start (LLM call beginning)");
-      broadcastToSession(s, {
-        type: "session_update",
-        sessionId,
-        isStreaming: true,
-        driver: s.driver,
-      });
+      broadcastDriverUpdate(s, { isStreaming: true });
       break;
 
     case "agent_end": {
@@ -512,13 +509,7 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
         s,
         `⏹ agent_end${reason ? ` (${reason})` : ""} willRetry=${(event as any).willRetry ?? false} messages=${s.agentSession?.messages.length ?? 0}`,
       );
-      broadcastToSession(s, {
-        type: "session_update",
-        sessionId,
-        isStreaming: false,
-        driver: s.driver,
-        messageCount: s.agentSession?.messages.length ?? 0,
-      });
+      broadcastDriverUpdate(s, { isStreaming: false, messageCount: s.agentSession?.messages.length ?? 0 });
       break;
     }
 
