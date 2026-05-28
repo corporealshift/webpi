@@ -545,6 +545,44 @@
 
     .queue-bar.visible { display: flex; }
 
+    /* ─── Sidebar footer ─────────────────────────────────────── */
+    .session-list-footer {
+      padding: 8px 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .footer-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .footer-dot.connected { background: var(--green); }
+    .footer-dot.reconnecting { background: var(--orange); }
+    .footer-dot.disconnected { background: var(--red); }
+
+    .footer-updated {
+      flex: 1;
+      text-align: center;
+    }
+
+    .footer-refresh {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 2px;
+      transition: color 0.15s;
+    }
+    .footer-refresh:hover { color: var(--text); }
+
     /* ─── Mobile ─────────────────────────────────────────────── */
     @media (max-width: 768px) {
       .session-list {
@@ -656,6 +694,11 @@
           <button class="btn-new" id="btn-new">+ New</button>
         </div>
         <div class="session-items" id="session-items"></div>
+        <div class="session-list-footer" id="session-list-footer">
+          <span class="footer-dot disconnected" id="footer-dot"></span>
+          <span class="footer-updated" id="footer-updated">Updated —</span>
+          <button class="footer-refresh" id="footer-refresh" title="Refresh session list">↻</button>
+        </div>
       </div>
 
       <div class="chat-area">
@@ -711,6 +754,7 @@
       driver: 'none', // 'none' | 'external' | 'self' — who is writing to the current session
       replaying: false,
       wsDownSince: null,
+      lastListUpdate: null,
     };
 
     // ─── DOM refs ───────────────────────────────────────────────────────────────
@@ -738,8 +782,30 @@
     const queueBarEl = $('#queue-bar');
     const queueTextEl = $('#queue-text');
     const toastContainerEl = $('#toast-container');
+    const footerDotEl = $('#footer-dot');
+    const footerUpdatedEl = $('#footer-updated');
+    const footerRefreshEl = $('#footer-refresh');
 
     // ─── WebSocket ──────────────────────────────────────────────────────────────
+    function updateFooterTimestamp() {
+      if (state.lastListUpdate) {
+        const d = new Date(state.lastListUpdate);
+        footerUpdatedEl.textContent = 'Updated ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } else {
+        footerUpdatedEl.textContent = 'Updated —';
+      }
+    }
+
+    function updateFooterDot() {
+      if (!state.wsDownSince) {
+        footerDotEl.className = 'footer-dot connected';
+      } else if (state.isConnecting) {
+        footerDotEl.className = 'footer-dot reconnecting';
+      } else {
+        footerDotEl.className = 'footer-dot disconnected';
+      }
+    }
+
     function connect() {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${proto}//${location.host}`);
@@ -748,12 +814,16 @@
         console.log('[ws] connected, readyState:', ws.readyState);
         state.ws = ws;
         state.isConnecting = false;
+        state.wsDownSince = null;
+        updateFooterDot();
         listSessions();
       };
 
       ws.onclose = (e) => {
         console.log('[ws] closed:', e.code, e.reason);
         state.ws = null;
+        state.wsDownSince = Date.now();
+        updateFooterDot();
         setTimeout(connect, 2000);
       };
 
@@ -764,7 +834,12 @@
 
       ws.onerror = (e) => {
         console.error('[ws] error event:', e);
-        showToast('Connection error', 'error');
+        // Track when the WS went down; only toast if outage exceeds 5s
+        if (!state.wsDownSince) state.wsDownSince = Date.now();
+        const outageMs = Date.now() - state.wsDownSince;
+        if (outageMs > 5000) {
+          showToast('Connection lost', 'error');
+        }
       };
     }
 
@@ -788,7 +863,9 @@
       switch (event.type) {
         case 'session_list':
           state.sessions = event.sessions;
+          state.lastListUpdate = Date.now();
           renderSessionList();
+          updateFooterTimestamp();
           break;
 
         case 'session_update':
@@ -934,6 +1011,32 @@
           if (state.clientSessionId && event.phase === 'start') {
             showToast('Compacting context...', 'info');
           }
+          break;
+
+        case 'replay_start':
+          state.replaying = true;
+          // Hide streaming affordances during replay
+          btnSendEl.textContent = '➤';
+          btnSendEl.classList.remove('abort-btn');
+          inputBoxEl.disabled = true;
+          // Show loading history indicator
+          const loadingMsg = document.createElement('div');
+          loadingMsg.className = 'message assistant';
+          loadingMsg.id = 'replay-loading';
+          loadingMsg.innerHTML = `
+            <div class="message-bubble" style="color: var(--text-muted); font-size: 12px;">
+              Loading history…
+            </div>
+          `;
+          messagesEl.appendChild(loadingMsg);
+          break;
+
+        case 'replay_end':
+          state.replaying = false;
+          const loadingEl = document.getElementById('replay-loading');
+          if (loadingEl) loadingEl.remove();
+          inputBoxEl.disabled = state.isStreaming;
+          scrollToBottom();
           break;
 
         case 'error':
@@ -1143,18 +1246,20 @@
 
     function renderToolEvent(event) {
       const key = event.toolCallId;
+      const toolNames = {
+        read: '📄', bash: '⚡', edit: '✏️', write: '💾',
+        grep: '🔍', find: '📁', ls: '📋'
+      };
+      const icon = toolNames[event.toolName] || '🔧';
 
-      if (event.status === 'start') {
-        const toolNames = {
-          read: '📄', bash: '⚡', edit: '✏️', write: '💾',
-          grep: '🔍', find: '📁', ls: '📋'
-        };
-        const icon = toolNames[event.toolName] || '🔧';
+      let el = toolElements.get(key);
 
-        const div = document.createElement('div');
-        div.className = 'tool-call';
-        div.dataset.toolId = key;
-        div.innerHTML = `
+      // Create card if it doesn't exist (handles replay where tool_use start may not have been seen)
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'tool-call';
+        el.dataset.toolId = key;
+        el.innerHTML = `
           <div class="tool-header">
             <div class="tool-header-left">
               <span class="tool-icon">${icon}</span>
@@ -1167,25 +1272,27 @@
           </div>
           <div class="tool-body collapsed"></div>
         `;
-        messagesEl.appendChild(div);
+        messagesEl.appendChild(el);
 
         // Toggle collapse
-        div.querySelector('.tool-header').addEventListener('click', () => {
-          const body = div.querySelector('.tool-body');
-          const toggle = div.querySelector('.tool-toggle');
+        el.querySelector('.tool-header').addEventListener('click', () => {
+          const body = el.querySelector('.tool-body');
+          const toggle = el.querySelector('.tool-toggle');
           body.classList.toggle('collapsed');
           toggle.classList.toggle('open');
         });
 
-        toolElements.set(key, div);
-        scrollToBottom();
+        toolElements.set(key, el);
       }
-
-      const el = toolElements.get(key);
-      if (!el) return;
 
       const statusEl = el.querySelector('.tool-status');
       const bodyEl = el.querySelector('.tool-body');
+
+      if (event.status === 'start') {
+        statusEl.className = 'tool-status pending';
+        statusEl.textContent = 'pending';
+        bodyEl.textContent = '';
+      }
 
       if (event.status === 'running' || event.status === 'update') {
         statusEl.className = 'tool-status running';
@@ -1198,6 +1305,8 @@
         statusEl.textContent = event.isError ? 'error' : 'done';
         if (event.result) bodyEl.textContent = event.result;
       }
+
+      scrollToBottom();
     }
 
     // ─── Status UI ──────────────────────────────────────────────────────────────
@@ -1223,12 +1332,6 @@
     });
 
     // ─── Input ──────────────────────────────────────────────────────────────────
-    inputBoxEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
 
     // Auto-resize textarea
     inputBoxEl.addEventListener('input', () => {
@@ -1262,6 +1365,10 @@
 
       send({ type: 'prompt', message: text });
     }
+
+    footerRefreshEl.addEventListener('click', () => {
+      listSessions();
+    });
 
     // ─── Mobile menu ────────────────────────────────────────────────────────────
     function openMobileMenu() {
@@ -1324,6 +1431,13 @@
         messagesEl.scrollTop = messagesEl.scrollHeight;
       });
     }
+
+    // Periodically update footer dot to reflect reconnecting state
+    setInterval(() => {
+      if (state.wsDownSince && state.isConnecting) {
+        updateFooterDot();
+      }
+    }, 1000);
 
     // ─── Init ───────────────────────────────────────────────────────────────────
     console.log('[init] Page loaded, connecting...');
