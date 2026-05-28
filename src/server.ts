@@ -111,6 +111,24 @@ function parseJsonlChunk(text: string): { entries: JsonlEntry[]; leftover: strin
   return { entries, leftover };
 }
 
+function stringifyToolResultContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part: any) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object") {
+          if (typeof part.text === "string") return part.text;
+          if (typeof part.content === "string") return part.content;
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
 function normalizeMessage(msg: any, opts: { finalized: boolean }): any {
   const content = msg.content;
   const parts: { type: string; text?: string; toolName?: string; toolCallId?: string; args?: Record<string, unknown> }[] = [];
@@ -745,7 +763,7 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
           toolName: msg.toolName ?? "",
           toolCallId: msg.toolCallId ?? "",
           status: "end" as const,
-          result: typeof msg.content === "string" ? msg.content : "",
+          result: stringifyToolResultContent(msg.content),
           isError: msg.isError,
         });
       }
