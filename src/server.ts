@@ -73,6 +73,19 @@ function preview(text: string, n = 60): string {
   return t.length > n ? t.slice(0, n) + "…" : t;
 }
 
+/**
+ * Determine whether a session is currently "working" (streaming / actively driven).
+ *
+ * For self-driven sessions: mirrors agentSession.isStreaming.
+ * For externally driven sessions: the 15s file-watch idle timer acts as heartbeat —
+ *   timer present = someone is writing (working), timer absent = idle.
+ */
+function computeActivity(s: SessionState): boolean {
+  if (s.driver === "self") return !!s.agentSession?.isStreaming;
+  if (s.driver === "external") return s.externalIdleTimer !== null;
+  return false;
+}
+
 // ─── JSONL helpers ──────────────────────────────────────────────────────────
 
 interface JsonlEntry {
@@ -700,28 +713,56 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
     sessionId: s.sessionId,
     sessionFile: s.sessionFile,
     sessionName: s.sessionName,
-    isStreaming: !!s.agentSession?.isStreaming,
+    isStreaming: computeActivity(s),
     driver: s.driver,
     messageCount: s.knownEntryIds.size,
     clientSessionId: s.sessionId,
   });
   // Replay all on-disk message entries to the connecting client
   const data = await fs.promises.readFile(sessionFile, "utf8");
+  sendToClient(client, { type: "replay_start", sessionId: s.sessionId });
   for (const line of data.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
       const entry = JSON.parse(trimmed);
       if (entry.type !== "message") continue;
-      sendToClient(client, {
-        type: "message",
-        sessionId: s.sessionId,
-        message: normalizeMessage(entry.message ?? {}, { finalized: true }),
-      });
+
+      const msg = entry.message ?? {};
+      if (msg.role === "user") {
+        // User message — emit as a single message event with text parts
+        const wireMsg = normalizeMessage(msg, { finalized: true });
+        if (wireMsg.parts.length > 0) {
+          sendToClient(client, { type: "message", sessionId: s.sessionId, message: wireMsg });
+        }
+      } else if (msg.role === "assistant") {
+        // Walk content blocks in order, emit message events for text/thinking
+        // and tool events for tool_use blocks
+        const decomposed = decomposeAssistantMessage(msg);
+        for (const ev of decomposed) {
+          if (ev.type === "message") {
+            sendToClient(client, { type: "message", sessionId: s.sessionId, message: ev.payload });
+          } else if (ev.type === "tool") {
+            sendToClient(client, { type: "tool", sessionId: s.sessionId, ...ev.payload });
+          }
+        }
+      } else if (msg.role === "toolResult" || msg.role === "tool") {
+        // Tool result — emit a tool event with status: "end"
+        sendToClient(client, {
+          type: "tool",
+          sessionId: s.sessionId,
+          toolName: msg.toolName ?? "",
+          toolCallId: msg.toolCallId ?? "",
+          status: "end" as const,
+          result: typeof msg.content === "string" ? msg.content : "",
+          isError: msg.isError,
+        });
+      }
     } catch {
       // skip malformed lines
     }
   }
+  sendToClient(client, { type: "replay_end", sessionId: s.sessionId });
 }
 
 async function detachClient(client: Client): Promise<void> {
