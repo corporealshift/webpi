@@ -32,7 +32,7 @@
       font-family: var(--font-sans);
       background: var(--bg);
       color: var(--text);
-      height: 100dvh;
+      height: var(--app-height, 100dvh);
       overflow: hidden;
     }
 
@@ -40,7 +40,7 @@
     .app {
       display: flex;
       flex-direction: column;
-      height: 100dvh;
+      height: var(--app-height, 100dvh);
     }
 
     .header {
@@ -586,33 +586,19 @@
 
     /* ─── Mobile ─────────────────────────────────────────────── */
     @media (max-width: 768px) {
+      /* Session list is the full-width home view when no session is open */
       .session-list {
         position: absolute;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        z-index: 100;
-        width: 85vw;
-        max-width: 320px;
-        transform: translateX(-100%);
-      }
-
-      .session-list.open { transform: translateX(0); }
-
-      .overlay {
-        position: fixed;
         inset: 0;
-        background: rgba(0,0,0,0.5);
-        z-index: 99;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.2s;
+        width: 100%;
+        max-width: none;
+        z-index: 100;
       }
 
-      .overlay.visible {
-        opacity: 1;
-        pointer-events: auto;
-      }
+      /* Chat is hidden until a session is active; .show-chat swaps the views */
+      .chat-area { display: none; }
+      .main.show-chat .session-list { display: none; }
+      .main.show-chat .chat-area { display: flex; }
 
       .message { max-width: 95%; }
     }
@@ -682,13 +668,9 @@
         <div class="logo">π</div>
         <span>web-pi</span>
       </div>
-      <div class="header-actions">
-        <button class="btn-icon" id="btn-menu" title="Sessions">☰</button>
-      </div>
     </div>
 
-    <div class="main">
-      <div class="overlay" id="overlay"></div>
+    <div class="main" id="main">
       <div class="session-list" id="session-list">
         <div class="session-list-header">
           <h3>Sessions</h3>
@@ -704,7 +686,7 @@
 
       <div class="chat-area">
         <div class="chat-header" id="chat-header" style="display:none;">
-          <button class="btn-icon" id="btn-menu-mobile" title="Sessions" style="display:none;">☰</button>
+          <button class="btn-icon" id="btn-menu-mobile" title="Back to sessions" style="display:none;">←</button>
           <div class="chat-header-info">
             <div class="chat-header-name" id="chat-name"></div>
             <div class="chat-header-status">
@@ -762,9 +744,7 @@
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
 
-    const sessionListEl = $('#session-list');
     const sessionItemsEl = $('#session-items');
-    const overlayEl = $('#overlay');
     const chatHeaderEl = $('#chat-header');
     const chatNameEl = $('#chat-name');
     const chatModelEl = $('#chat-model');
@@ -772,12 +752,12 @@
     const statusTextEl = $('#status-text');
     const driverPillEl = $('#driver-pill');
     const btnReleaseEl = $('#btn-release');
+    const mainEl = $('#main');
     const messagesEl = $('#messages');
     const emptyStateEl = $('#empty-state');
     const inputAreaEl = $('#input-area');
     const inputBoxEl = $('#input-box');
     const btnSendEl = $('#btn-send');
-    const btnMenuEl = $('#btn-menu');
     const btnMenuMobileEl = $('#btn-menu-mobile');
     const btnNewEl = $('#btn-new');
     const queueBarEl = $('#queue-bar');
@@ -879,15 +859,7 @@
           // Server disconnected this client's session
           if (!event.sessionId) {
             console.log('[session_update] server disconnected session');
-            state.clientSessionId = null;
-            state.activeSession = null;
-            state.messages = [];
-            messagesEl.innerHTML = '';
-            messagesEl.appendChild(emptyStateEl);
-            emptyStateEl.style.display = 'flex';
-            chatHeaderEl.style.display = 'none';
-            inputAreaEl.style.display = 'none';
-            renderSessionList();
+            clearToHome();
             return;
           }
           // Handle new session creation or reconnection (no clientSessionId yet)
@@ -920,6 +892,7 @@
             inputAreaEl.style.display = 'block';
             chatNameEl.textContent = event.sessionName || 'New session';
             emptyStateEl.style.display = 'none';
+            mainEl.classList.add('show-chat');
             if (event.driver !== undefined) state.driver = event.driver;
             if (event.isStreaming !== undefined) state.isStreaming = !!event.isStreaming;
             renderSessionList();
@@ -1080,6 +1053,20 @@
       }
     }
 
+    // Clear the chat and return to the session-list home view.
+    function clearToHome() {
+      state.clientSessionId = null;
+      state.activeSession = null;
+      state.messages = [];
+      messagesEl.innerHTML = '';
+      messagesEl.appendChild(emptyStateEl);
+      emptyStateEl.style.display = 'flex';
+      chatHeaderEl.style.display = 'none';
+      inputAreaEl.style.display = 'none';
+      mainEl.classList.remove('show-chat');
+      renderSessionList();
+    }
+
     function connectToSession(session) {
       // Set activeSession for UI purposes; the real guard is clientSessionId
       // which is set by the server's session_update response.
@@ -1090,8 +1077,8 @@
       inputAreaEl.style.display = 'block';
       chatNameEl.textContent = pickDisplayName(session);
       emptyStateEl.style.display = 'none';
+      mainEl.classList.add('show-chat');
       renderSessionList();
-      closeMobileMenu();
       send({ type: 'connect_session', sessionFile: session.file });
     }
 
@@ -1371,28 +1358,32 @@
       listSessions();
     });
 
-    // ─── Mobile menu ────────────────────────────────────────────────────────────
-    function openMobileMenu() {
-      sessionListEl.classList.add('open');
-      overlayEl.classList.add('visible');
-    }
+    // ─── Mobile back button ─────────────────────────────────────────────────────
+    // Returns to the full-width session-list home view on mobile.
+    btnMenuMobileEl.addEventListener('click', () => {
+      send({ type: 'disconnect_session' });
+      clearToHome();
+    });
 
-    function closeMobileMenu() {
-      sessionListEl.classList.remove('open');
-      overlayEl.classList.remove('visible');
-    }
-
-    btnMenuEl.addEventListener('click', openMobileMenu);
-    btnMenuMobileEl.addEventListener('click', openMobileMenu);
-    overlayEl.addEventListener('click', closeMobileMenu);
-
-    // Show mobile menu button when needed
+    // The back button only applies on mobile, where the chat is a full-screen view.
     function updateMobileMenu() {
       const show = window.innerWidth <= 768;
       btnMenuMobileEl.style.display = show ? 'flex' : 'none';
     }
     window.addEventListener('resize', updateMobileMenu);
     updateMobileMenu();
+
+    // Size the layout to the visible viewport so the mobile keyboard doesn't
+    // cover the input field — iOS Safari doesn't shrink dvh when the keyboard opens.
+    const vv = window.visualViewport;
+    if (vv) {
+      const applyViewportHeight = () => {
+        document.documentElement.style.setProperty('--app-height', vv.height + 'px');
+      };
+      vv.addEventListener('resize', applyViewportHeight);
+      vv.addEventListener('scroll', applyViewportHeight);
+      applyViewportHeight();
+    }
 
     // ─── New session ────────────────────────────────────────────────────────────
     btnNewEl.addEventListener('click', () => {
@@ -1408,7 +1399,7 @@
       emptyStateEl.style.display = 'flex';
       chatHeaderEl.style.display = 'none';
       inputAreaEl.style.display = 'none';
-      closeMobileMenu();
+      mainEl.classList.add('show-chat');
     });
 
     // ─── Toast ──────────────────────────────────────────────────────────────────
