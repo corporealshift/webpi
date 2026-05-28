@@ -840,10 +840,23 @@ async function handleRelease(client: Client): Promise<void> {
   if (s.agentSession) await releaseOwnership(s);
 }
 
-async function handleNewSession(client: Client): Promise<void> {
+async function handleNewSession(client: Client, requestedCwd?: string): Promise<void> {
   try {
     if (client.subscribedSessionFile) await detachClient(client);
-    const cwd = process.cwd();
+    let cwd = process.cwd();
+    if (requestedCwd && requestedCwd.trim()) {
+      const candidate = path.resolve(requestedCwd.trim());
+      try {
+        if (!(await fs.promises.stat(candidate)).isDirectory()) {
+          sendToClient(client, { type: "error", message: `Not a directory: ${candidate}` });
+          return;
+        }
+      } catch {
+        sendToClient(client, { type: "error", message: `Directory not found: ${candidate}` });
+        return;
+      }
+      cwd = candidate;
+    }
     const settingsManager = SettingsManager.create(cwd, AGENT_DIR);
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -903,6 +916,7 @@ async function handleNewSession(client: Client): Promise<void> {
       driver: "self",
       messageCount: 0,
       clientSessionId: s.sessionId,
+      cwd,
     });
   } catch (err) {
     console.error("[handleNewSession] error:", err);
@@ -955,7 +969,7 @@ async function handleCommand(client: Client, command: ClientCommand): Promise<vo
       await handleRelease(client);
       break;
     case "new_session":
-      await handleNewSession(client);
+      await handleNewSession(client, (command as any).cwd);
       break;
     case "set_session_name":
       await handleSetSessionName(client, (command as any).name);

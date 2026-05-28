@@ -25,6 +25,8 @@ export interface SessionUpdateEvent extends ServerEvent {
   driver?: "none" | "external" | "self";
   /** Echoed back on connect to confirm which session this client is bound to. */
   clientSessionId?: string;
+  /** Working directory of the session (sent on creation so the client can label it). */
+  cwd?: string;
 }
 
 export interface MessageEvent extends ServerEvent {
@@ -126,6 +128,8 @@ export interface AbortCommand extends ClientCommand {
 
 export interface NewSessionCommand extends ClientCommand {
   type: "new_session";
+  /** Absolute path to start the session in. Defaults to the server's cwd. */
+  cwd?: string;
 }
 
 export interface SetModelCommand extends ClientCommand {

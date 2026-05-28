@@ -659,6 +659,75 @@
       color: var(--accent);
       margin-left: 1px;
     }
+
+    /* ─── New-session modal ──────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-backdrop.visible { display: flex; }
+
+    .modal {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .modal-title { font-size: 16px; font-weight: 700; }
+
+    .modal-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .modal-select, .modal-input {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+    .modal-input { font-family: var(--font-mono); }
+    .modal-select:focus, .modal-input:focus { border-color: var(--accent-dim); }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .btn-secondary {
+      padding: 6px 14px;
+      background: var(--bg-tertiary);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-secondary:hover { background: var(--border); }
+    #new-create { padding: 6px 14px; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -723,6 +792,19 @@
 
   <div class="toast-container" id="toast-container"></div>
 
+  <div class="modal-backdrop" id="new-session-modal">
+    <div class="modal">
+      <h3 class="modal-title">New session</h3>
+      <label class="modal-label" for="new-dir-select">Project directory</label>
+      <select id="new-dir-select" class="modal-select"></select>
+      <input id="new-dir-path" class="modal-input" type="text" placeholder="C:\path\to\project" spellcheck="false" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn-secondary" id="new-cancel">Cancel</button>
+        <button class="btn-new" id="new-create">Create</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ─── State ──────────────────────────────────────────────────────────────────
     const state = {
@@ -760,6 +842,11 @@
     const btnSendEl = $('#btn-send');
     const btnMenuMobileEl = $('#btn-menu-mobile');
     const btnNewEl = $('#btn-new');
+    const newSessionModalEl = $('#new-session-modal');
+    const newDirSelectEl = $('#new-dir-select');
+    const newDirPathEl = $('#new-dir-path');
+    const newCancelEl = $('#new-cancel');
+    const newCreateEl = $('#new-create');
     const queueBarEl = $('#queue-bar');
     const queueTextEl = $('#queue-text');
     const toastContainerEl = $('#toast-container');
@@ -885,9 +972,11 @@
               console.log('[session_update] found existing session by id or file');
             }
             console.log('[session_update] setting activeSession to:', newSession);
+            if (event.cwd) newSession.cwd = event.cwd;
             state.activeSession = newSession;
             state.messages = [];
             messagesEl.innerHTML = '';
+            resetRenderState();
             chatHeaderEl.style.display = 'flex';
             inputAreaEl.style.display = 'block';
             chatNameEl.textContent = event.sessionName || 'New session';
@@ -922,43 +1011,43 @@
 
         case 'message':
           if (state.clientSessionId === event.sessionId) {
-            const isFinalized = event.message.finalized === true;
-            const lastMsg = state.messages[state.messages.length - 1];
+            const msg = event.message;
+            const isFinalized = msg.finalized === true;
 
-            // During replay, all entries are finalized — just render
+            // Replay: entries are pre-decomposed and final — render each once.
             if (state.replaying) {
-              state.messages.push({ ...event.message, finalized: true });
-              renderEntry(event.message);
+              renderEntry(msg);
               break;
             }
 
-            // Streaming path: only applies to live (non-replay) assistant messages
-            if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.finalized && !isFinalized) {
-              // Mid-stream: append delta to text node
-              const delta = event.message.parts?.find(p => p.type === 'text')?.text ?? '';
-              if (delta) {
-                lastMsg.content = (lastMsg.content ?? '') + delta;
-                appendStreamingDelta(delta, false);
-              }
-            } else if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.finalized && isFinalized) {
-              // Finalize in-flight streaming bubble
-              lastMsg.finalized = true;
-              Object.assign(lastMsg, event.message, { finalized: true });
-              finalizeLastAssistantMessage(lastMsg);
+            // Live: a message arrives as a non-finalized "start" then a finalized
+            // "end". Render once on start, then update that same element on end —
+            // otherwise user/tool messages get appended twice.
+            if (inFlightMessageEl && inFlightMessageEl.dataset.role === msg.role) {
+              rerenderEntryContent(inFlightMessageEl, msg);
             } else {
-              state.messages.push({ ...event.message, finalized: isFinalized });
-              renderEntry(event.message);
+              inFlightMessageEl = renderEntry(msg, true);
+              if (msg.role === 'assistant') {
+                streamingEl = inFlightMessageEl;
+                streamingTextNode = null;
+                streamingThinkingNode = null;
+              }
+            }
+
+            if (isFinalized) {
+              if (msg.role === 'assistant') {
+                streamingEl = null;
+                streamingTextNode = null;
+                streamingThinkingNode = null;
+              }
+              inFlightMessageEl = null;
             }
           }
           break;
 
         case 'streaming':
-          if (state.clientSessionId === event.sessionId) {
-            const lastMsg = state.messages[state.messages.length - 1];
-            if (lastMsg && !lastMsg.finalized) {
-              lastMsg.content += event.delta;
-              appendStreamingDelta(event.delta, !!event.isThinking);
-            }
+          if (state.clientSessionId === event.sessionId && streamingEl) {
+            appendStreamingDelta(event.delta, !!event.isThinking);
           }
           break;
 
@@ -1059,6 +1148,7 @@
       state.activeSession = null;
       state.messages = [];
       messagesEl.innerHTML = '';
+      resetRenderState();
       messagesEl.appendChild(emptyStateEl);
       emptyStateEl.style.display = 'flex';
       chatHeaderEl.style.display = 'none';
@@ -1073,6 +1163,7 @@
       state.activeSession = session;
       state.messages = [];
       messagesEl.innerHTML = '';
+      resetRenderState();
       chatHeaderEl.style.display = 'flex';
       inputAreaEl.style.display = 'block';
       chatNameEl.textContent = pickDisplayName(session);
@@ -1088,11 +1179,17 @@
     // full HTML parse, regex pass over the entire response, and layout — burning GPU).
     let streamingTextNode = null;
     let streamingThinkingNode = null;
+    // The live message element currently being filled (between its start and end
+    // events), and the assistant element that streaming deltas append into.
+    let inFlightMessageEl = null;
+    let streamingEl = null;
 
-    function renderEntry(entry) {
-      // Belt-and-suspenders: skip empty message events
-      if (entry.role === 'assistant' && entry.parts && entry.parts.length === 0) return;
-      if (entry.role === 'user' && entry.parts && entry.parts.every(p => p.type === 'text' && !p.text)) return;
+    function renderEntry(entry, allowEmpty = false) {
+      // Skip empty message events unless we need a placeholder to stream into.
+      if (!allowEmpty) {
+        if (entry.role === 'assistant' && entry.parts && entry.parts.length === 0) return null;
+        if (entry.role === 'user' && entry.parts && entry.parts.every(p => p.type === 'text' && !p.text)) return null;
+      }
 
       const div = document.createElement('div');
       div.className = `message ${entry.role}`;
@@ -1100,28 +1197,53 @@
 
       const bubble = document.createElement('div');
       bubble.className = 'message-bubble';
-
-      if (entry.parts) {
-        for (const part of entry.parts) {
-          if (part.type === 'text') {
-            renderTextPart(part.text, bubble);
-          } else if (part.type === 'thinking') {
-            renderThinkingPart(part.text, bubble);
-          }
-        }
-      }
+      renderParts(entry.parts, bubble);
 
       div.appendChild(bubble);
       renderTimestamp(entry, div);
       messagesEl.appendChild(div);
+      scrollToBottom();
+      return div;
+    }
+
+    // Render an entry's parts into a bubble (shared by create and in-place update).
+    function renderParts(parts, bubble) {
+      if (!parts) return;
+      for (const part of parts) {
+        if (part.type === 'text') {
+          renderTextPart(part.text, bubble);
+        } else if (part.type === 'thinking') {
+          renderThinkingPart(part.text, bubble);
+        }
+      }
+    }
+
+    // Clear per-session render bookkeeping so a new session can't update detached
+    // elements left over from the previous one.
+    function resetRenderState() {
+      toolElements.clear();
+      inFlightMessageEl = null;
+      streamingEl = null;
+      streamingTextNode = null;
+      streamingThinkingNode = null;
+    }
+
+    // Re-render an already-appended message element's content in place (e.g. when a
+    // streamed message finalizes, or a start event is followed by its end event).
+    function rerenderEntryContent(el, entry) {
+      const bubble = el.querySelector('.message-bubble');
+      if (!bubble) return;
+      bubble.innerHTML = '';
+      renderParts(entry.parts, bubble);
+      streamingTextNode = null;
+      streamingThinkingNode = null;
       scrollToBottom();
     }
 
     // Append a token's worth of text to the currently-streaming assistant bubble.
     // Plain text only during streaming — formatText runs once at finalize.
     function appendStreamingDelta(delta, isThinking) {
-      const msgs = messagesEl.querySelectorAll('.message.assistant');
-      const bubble = msgs[msgs.length - 1]?.querySelector('.message-bubble');
+      const bubble = streamingEl?.querySelector('.message-bubble');
       if (!bubble) return;
       if (isThinking) {
         if (!streamingThinkingNode) {
@@ -1141,27 +1263,6 @@
         }
         streamingTextNode.data += delta;
       }
-      scrollToBottom();
-    }
-
-    // When the assistant's message_end arrives, replace the streaming text nodes
-    // with a one-time fully-formatted render (markdown, code blocks, etc.).
-    function finalizeLastAssistantMessage(msg) {
-      const msgs = messagesEl.querySelectorAll('.message.assistant');
-      const bubble = msgs[msgs.length - 1]?.querySelector('.message-bubble');
-      if (!bubble) return;
-      bubble.innerHTML = '';
-      if (msg.parts) {
-        for (const part of msg.parts) {
-          if (part.type === 'text') {
-            renderTextPart(part.text, bubble);
-          } else if (part.type === 'thinking') {
-            renderThinkingPart(part.text, bubble);
-          }
-        }
-      }
-      streamingTextNode = null;
-      streamingThinkingNode = null;
       scrollToBottom();
     }
 
@@ -1386,20 +1487,81 @@
     }
 
     // ─── New session ────────────────────────────────────────────────────────────
-    btnNewEl.addEventListener('click', () => {
-      console.log('[New] Sending new_session request');
-      send({ type: 'new_session' });
-      // Clear UI immediately but keep state.clientSessionId null
-      // The session_update handler will set it when server responds
-      state.clientSessionId = null;
-      state.activeSession = null;
-      state.messages = [];
-      messagesEl.innerHTML = '';
-      messagesEl.appendChild(emptyStateEl);
-      emptyStateEl.style.display = 'flex';
-      chatHeaderEl.style.display = 'none';
-      inputAreaEl.style.display = 'none';
-      mainEl.classList.add('show-chat');
+    const CUSTOM_DIR = '__custom__';
+
+    // Unique project directories from existing sessions, most-recent first.
+    function recentDirs() {
+      const seen = new Set();
+      const dirs = [];
+      for (const s of state.sessions) {
+        if (s.cwd && !seen.has(s.cwd)) {
+          seen.add(s.cwd);
+          dirs.push(s.cwd);
+        }
+      }
+      return dirs;
+    }
+
+    function openNewSessionDialog() {
+      const dirs = recentDirs();
+      newDirSelectEl.innerHTML = '';
+      for (const dir of dirs) {
+        const opt = document.createElement('option');
+        opt.value = dir;
+        opt.textContent = (dir.split(/[\\/]/).pop() || dir) + '  —  ' + dir;
+        newDirSelectEl.appendChild(opt);
+      }
+      const customOpt = document.createElement('option');
+      customOpt.value = CUSTOM_DIR;
+      customOpt.textContent = '+ Custom path…';
+      newDirSelectEl.appendChild(customOpt);
+
+      // Default to the most recent dir (or custom if there are none).
+      if (dirs.length) {
+        newDirSelectEl.value = dirs[0];
+        newDirPathEl.value = dirs[0];
+      } else {
+        newDirSelectEl.value = CUSTOM_DIR;
+        newDirPathEl.value = '';
+      }
+      newSessionModalEl.classList.add('visible');
+      newDirPathEl.focus();
+    }
+
+    function closeNewSessionDialog() {
+      newSessionModalEl.classList.remove('visible');
+    }
+
+    function createNewSession() {
+      const cwd = newDirPathEl.value.trim();
+      if (!cwd) {
+        showToast('Enter a project directory.', 'error');
+        return;
+      }
+      console.log('[New] Sending new_session request cwd=', cwd);
+      send({ type: 'new_session', cwd });
+      closeNewSessionDialog();
+      // The session_update handler sets up the chat view once the server confirms;
+      // on failure (e.g. bad directory) an error toast shows and the view is unchanged.
+    }
+
+    btnNewEl.addEventListener('click', openNewSessionDialog);
+    newCancelEl.addEventListener('click', closeNewSessionDialog);
+    newCreateEl.addEventListener('click', createNewSession);
+    newSessionModalEl.addEventListener('click', (e) => {
+      if (e.target === newSessionModalEl) closeNewSessionDialog();
+    });
+    // Selecting a recent dir fills the path field; Custom clears it to type a new one.
+    newDirSelectEl.addEventListener('change', () => {
+      if (newDirSelectEl.value === CUSTOM_DIR) {
+        newDirPathEl.value = '';
+        newDirPathEl.focus();
+      } else {
+        newDirPathEl.value = newDirSelectEl.value;
+      }
+    });
+    newDirPathEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); createNewSession(); }
     });
 
     // ─── Toast ──────────────────────────────────────────────────────────────────
