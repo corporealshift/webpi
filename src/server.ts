@@ -98,29 +98,37 @@ function parseJsonlChunk(text: string): { entries: JsonlEntry[]; leftover: strin
   return { entries, leftover };
 }
 
-function entryToWireMessage(entry: any): any {
-  const msg = entry.message ?? {};
-  return normalizeMessage(msg, { finalized: true });
-}
-
 function normalizeMessage(msg: any, opts: { finalized: boolean }): any {
   const content = msg.content;
-  let text = "";
+  const parts: { type: string; text?: string; toolName?: string; toolCallId?: string; args?: Record<string, unknown> }[] = [];
+
   if (typeof content === "string") {
-    text = content;
+    parts.push({ type: "text", text: content });
   } else if (Array.isArray(content)) {
-    text = content
-      .filter((c: any) => c.type === "text")
-      .map((c: any) => c.text)
-      .join("\n");
+    for (const c of content) {
+      if (c.type === "text" && c.text) {
+        parts.push({ type: "text", text: c.text });
+      } else if (c.type === "thinking" && c.thinking) {
+        parts.push({ type: "thinking", text: c.thinking });
+      } else if (c.type === "toolCall" || c.type === "tool_use") {
+        parts.push({
+          type: "toolCall",
+          toolName: c.name ?? c.tool_name ?? "",
+          toolCallId: c.id ?? c.tool_call_id ?? "",
+          args: c.arguments ?? {},
+        });
+      }
+    }
   }
-  // If the turn errored, surface the error text in-band so it's not a silent empty bubble.
-  if (msg.stopReason === "error" && msg.errorMessage && !text) {
-    text = `⚠ ${msg.errorMessage}`;
+
+  // If the turn errored with no other content, surface the error text in-band.
+  if (msg.stopReason === "error" && msg.errorMessage && parts.length === 0) {
+    parts.push({ type: "text", text: `⚠ ${msg.errorMessage}` });
   }
+
   return {
     role: msg.role,
-    content: text,
+    parts,
     timestamp: msg.timestamp ?? Date.now(),
     toolCallId: msg.toolCallId,
     toolName: msg.toolName,
@@ -130,6 +138,98 @@ function normalizeMessage(msg: any, opts: { finalized: boolean }): any {
     usage: msg.usage,
     finalized: opts.finalized,
   };
+}
+
+/**
+ * Decompose an assistant message's content blocks into a sequence of
+ * wire events in live order: message events for text/thinking runs,
+ * tool events for tool_use blocks.
+ *
+ * Returns an array of { type: "message" | "tool", payload: any } objects.
+ */
+function decomposeAssistantMessage(msg: any): Array<{ type: "message" | "tool"; payload: any }> {
+  const content = msg.content;
+  if (!Array.isArray(content)) {
+    // Single string content — emit as a single message event
+    const parts = content ? [{ type: "text", text: content }] : [];
+    return [{ type: "message", payload: normalizeMessage(msg, { finalized: true }) }];
+  }
+
+  const events: Array<{ type: "message" | "tool"; payload: any }> = [];
+  let textBuffer = "";
+  let thinkingBuffer = "";
+
+  const flushText = () => {
+    if (textBuffer.trim()) {
+      events.push({
+        type: "message",
+        payload: {
+          ...normalizeMessage(msg, { finalized: true }),
+          parts: [{ type: "text", text: textBuffer.trim() }],
+        },
+      });
+      textBuffer = "";
+    }
+  };
+
+  const flushThinking = () => {
+    if (thinkingBuffer.trim()) {
+      events.push({
+        type: "message",
+        payload: {
+          ...normalizeMessage(msg, { finalized: true }),
+          parts: [{ type: "thinking", text: thinkingBuffer.trim() }],
+        },
+      });
+      thinkingBuffer = "";
+    }
+  };
+
+  for (const c of content) {
+    if (c.type === "text" && c.text) {
+      textBuffer += c.text;
+    } else if (c.type === "thinking" && c.thinking) {
+      thinkingBuffer += c.thinking;
+    } else if (c.type === "toolCall" || c.type === "tool_use") {
+      // Flush any buffered text/thinking before the tool call
+      flushText();
+      flushThinking();
+      events.push({
+        type: "tool",
+        payload: {
+          sessionId: msg._sessionId ?? "",
+          toolName: c.name ?? c.tool_name ?? "",
+          toolCallId: c.id ?? c.tool_call_id ?? "",
+          args: c.arguments ?? {},
+          status: "end" as const,
+        },
+      });
+    }
+  }
+
+  // Flush remaining buffers
+  flushText();
+  flushThinking();
+
+  // If no events were produced (pure tool-use message with no text),
+  // emit a minimal message event so the client has a container
+  if (events.length === 0) {
+    const parts = [];
+    if (msg.stopReason === "error" && msg.errorMessage) {
+      parts.push({ type: "text", text: `⚠ ${msg.errorMessage}` });
+    }
+    if (parts.length > 0) {
+      events.push({
+        type: "message",
+        payload: {
+          ...normalizeMessage(msg, { finalized: true }),
+          parts,
+        },
+      });
+    }
+  }
+
+  return events;
 }
 
 // ─── Broadcast helpers ──────────────────────────────────────────────────────
@@ -289,7 +389,7 @@ async function readNewEntries(s: SessionState): Promise<void> {
       broadcastToSession(s, {
         type: "message",
         sessionId: s.sessionId,
-        message: entryToWireMessage(e.raw),
+        message: normalizeMessage(e.raw.message ?? {}, { finalized: true }),
       });
     }
   }
@@ -616,7 +716,7 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
       sendToClient(client, {
         type: "message",
         sessionId: s.sessionId,
-        message: entryToWireMessage(entry),
+        message: normalizeMessage(entry.message ?? {}, { finalized: true }),
       });
     } catch {
       // skip malformed lines
