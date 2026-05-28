@@ -44,6 +44,8 @@ interface SessionState {
   fileTail: string;
   knownEntryIds: Set<string>;
   externalIdleTimer: NodeJS.Timeout | null;
+  // Grace timer: releases an idle session a while after its last viewer leaves.
+  idleReleaseTimer: NodeJS.Timeout | null;
   // Owner-mode state
   agentSession: AgentSession | null;
   agentUnsubscribe: (() => void) | null;
@@ -341,6 +343,7 @@ async function getOrCreateSessionState(sessionFile: string): Promise<SessionStat
     fileTail: leftover,
     knownEntryIds: new Set(entries.map((e) => e.id).filter(Boolean)),
     externalIdleTimer: null,
+    idleReleaseTimer: null,
     agentSession: null,
     agentUnsubscribe: null,
     driver: "none",
@@ -443,6 +446,9 @@ async function readNewEntries(s: SessionState): Promise<void> {
     if (s.driver === "external") {
       s.driver = "none";
       broadcastDriverUpdate(s);
+      // An externally-driven session that went idle with no viewers should also
+      // be eligible for grace cleanup.
+      if (s.clients.size === 0) scheduleIdleRelease(s);
     }
   }, 15_000);
 }
@@ -518,6 +524,7 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
   switch (event.type) {
     case "agent_start":
       slog(s, "▶ agent_start (LLM call beginning)");
+      cancelIdleRelease(s);
       broadcastDriverUpdate(s, { isStreaming: true });
       break;
 
@@ -528,6 +535,8 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
         `⏹ agent_end${reason ? ` (${reason})` : ""} willRetry=${(event as any).willRetry ?? false} messages=${s.agentSession?.messages.length ?? 0}`,
       );
       broadcastDriverUpdate(s, { isStreaming: false, messageCount: s.agentSession?.messages.length ?? 0 });
+      // Task finished. If nobody is watching, start the idle grace countdown.
+      if (s.clients.size === 0) scheduleIdleRelease(s);
       break;
     }
 
@@ -717,6 +726,7 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
   const s = await getOrCreateSessionState(sessionFile);
   client.subscribedSessionFile = sessionFile;
   s.clients.add(client);
+  cancelIdleRelease(s);
   sendToClient(client, {
     type: "session_update",
     sessionId: s.sessionId,
@@ -774,6 +784,44 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
   sendToClient(client, { type: "replay_end", sessionId: s.sessionId });
 }
 
+// How long an idle, viewer-less session stays alive before it's torn down.
+// A session that is actively working is never torn down by this timer.
+const IDLE_RELEASE_MS = 15 * 60 * 1000;
+
+// Fully tear down a session: release ownership, stop watching, drop from the map.
+// The on-disk session file is untouched, so it can be reopened later.
+async function teardownSession(s: SessionState): Promise<void> {
+  if (s.idleReleaseTimer) {
+    clearTimeout(s.idleReleaseTimer);
+    s.idleReleaseTimer = null;
+  }
+  if (s.agentSession) await releaseOwnership(s);
+  if (s.externalIdleTimer) clearTimeout(s.externalIdleTimer);
+  s.watcher?.close();
+  sessions.delete(s.sessionFile);
+  console.log(`[session ${s.sessionId}] torn down (no viewers, idle)`);
+}
+
+function cancelIdleRelease(s: SessionState): void {
+  if (s.idleReleaseTimer) {
+    clearTimeout(s.idleReleaseTimer);
+    s.idleReleaseTimer = null;
+  }
+}
+
+// Arm the grace timer for a viewer-less, idle session. When it fires we re-check
+// that the session is still viewer-less and idle before tearing it down, so a
+// reconnect or a freshly-started task cancels the teardown.
+function scheduleIdleRelease(s: SessionState): void {
+  cancelIdleRelease(s);
+  s.idleReleaseTimer = setTimeout(() => {
+    s.idleReleaseTimer = null;
+    if (s.clients.size === 0 && !computeActivity(s)) {
+      void teardownSession(s);
+    }
+  }, IDLE_RELEASE_MS);
+}
+
 async function detachClient(client: Client): Promise<void> {
   const sf = client.subscribedSessionFile;
   if (!sf) return;
@@ -782,11 +830,15 @@ async function detachClient(client: Client): Promise<void> {
   if (!s) return;
   s.clients.delete(client);
   if (s.clients.size === 0) {
-    if (s.agentSession) await releaseOwnership(s);
-    if (s.externalIdleTimer) clearTimeout(s.externalIdleTimer);
-    s.watcher?.close();
-    sessions.delete(sf);
-    console.log(`[session ${s.sessionId}] closed (no viewers)`);
+    // Keep the session alive so a running task survives a closed browser/phone.
+    // If it's idle, start the grace timer; if it's working, leave it — the
+    // timer is (re)armed when the task finishes (see handleAgentEvent agent_end).
+    if (computeActivity(s)) {
+      console.log(`[session ${s.sessionId}] last viewer left — task still running, keeping alive`);
+    } else {
+      console.log(`[session ${s.sessionId}] last viewer left — idle, releasing in ${IDLE_RELEASE_MS / 60000}min`);
+      scheduleIdleRelease(s);
+    }
   }
 }
 
@@ -888,6 +940,7 @@ async function handleNewSession(client: Client, requestedCwd?: string): Promise<
       fileTail: "",
       knownEntryIds: new Set(),
       externalIdleTimer: null,
+      idleReleaseTimer: null,
       agentSession: session,
       agentUnsubscribe: null,
       driver: "self",
