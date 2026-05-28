@@ -80,6 +80,16 @@ export interface MessagesEvent extends ServerEvent {
   data: PiMessage[];
 }
 
+export interface ReplayStartEvent extends ServerEvent {
+  type: "replay_start";
+  sessionId: string;
+}
+
+export interface ReplayEndEvent extends ServerEvent {
+  type: "replay_end";
+  sessionId: string;
+}
+
 // ─── Client → Server commands ─────────────────────────────────────────────────
 
 export interface ClientCommand {
@@ -165,7 +175,7 @@ export type AnyClientCommand =
 
 export interface PiMessage {
   role: "user" | "assistant" | "toolResult" | "bashExecution";
-  content: string | ContentBlock[];
+  parts: PiPart[];
   timestamp: number;
   toolCallId?: string;
   toolName?: string;
@@ -174,14 +184,10 @@ export interface PiMessage {
   usage?: MessageUsage;
 }
 
-export interface ContentBlock {
-  type: "text" | "thinking" | "toolCall";
-  text?: string;
-  thinking?: string;
-  id?: string;
-  name?: string;
-  arguments?: string;
-}
+export type PiPart =
+  | { type: "text"; text: string }
+  | { type: "thinking"; text: string }
+  | { type: "toolCall"; toolName: string; toolCallId: string; args: Record<string, unknown> };
 
 export interface MessageUsage {
   input: number;
