@@ -5,12 +5,14 @@ Remote control for [pi](https://pi.dev) — the minimal terminal coding agent �
 ## Screenshots
 
 <p align="center">
-  <img src="docs/images/mobile-session-list.png" alt="Mobile session list" width="300">
-  &nbsp;&nbsp;
-  <img src="docs/images/mobile-new-session.png" alt="Starting a new session with a chosen project directory" width="300">
+  <img src="docs/images/mobile-session-list.png" alt="Mobile session list" width="260">
+  &nbsp;
+  <img src="docs/images/mobile-new-session.png" alt="Starting a new session with a chosen project directory" width="260">
+  &nbsp;
+  <img src="docs/images/mobile-chat.png" alt="Chat view with live thinking and tool calls" width="260">
 </p>
 
-On a phone the session list is the full-width home view; tapping a session opens the chat, and starting a new session lets you pick the project directory.
+On a phone the session list is the full-width home view; tapping a session opens the chat — with live thinking, tool calls, and streaming output — and starting a new session lets you pick the project directory.
 
 ## Architecture
 
