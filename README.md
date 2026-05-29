@@ -2,6 +2,16 @@
 
 Remote control for [pi](https://pi.dev) — the minimal terminal coding agent — via WebSocket. Access your pi sessions from any device with a web browser, including your phone.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/mobile-session-list.png" alt="Mobile session list" width="300">
+  &nbsp;&nbsp;
+  <img src="docs/images/mobile-new-session.png" alt="Starting a new session with a chosen project directory" width="300">
+</p>
+
+On a phone the session list is the full-width home view; tapping a session opens the chat, and starting a new session lets you pick the project directory.
+
 ## Architecture
 
 ```
@@ -68,12 +78,12 @@ Open `http://localhost:3456` in your browser. The server will:
 
 ## Features
 
-- **Session management** — List, connect, create new sessions
-- **Real-time streaming** — See messages, thinking, and tool calls as they happen
-- **Mobile-friendly** — Responsive design, works great on phones
-- **Queue messages** — Send steering/follow-up messages while pi is working
-- **Abort** — Stop a running session with one click
-- **Compact** — Manually trigger context compaction
+- **Session management** — List, connect to, and create sessions; choose the project directory for new ones
+- **Real-time streaming** — Messages, thinking, and tool calls render live, with full-fidelity replay of session history
+- **Resilient sessions** — Tasks keep running if you close the browser or phone, and reconnecting auto-resumes the session
+- **Mobile-friendly** — Responsive single-page UI that works well on phones
+- **Abort** — Stop a running task with one click
+- **Hand off to pi-CLI** — Release a session so the terminal `pi` can take over
 
 ## WebSocket Protocol
 
@@ -84,9 +94,10 @@ Open `http://localhost:3456` in your browser. The server will:
 | `list_sessions` | Get list of available sessions |
 | `connect_session` | Connect to a session by file path |
 | `disconnect_session` | Disconnect from current session |
+| `release_session` | Release ownership so the terminal `pi` can drive the session |
 | `prompt` | Send a message to pi |
 | `abort` | Abort the current operation |
-| `new_session` | Create a new session |
+| `new_session` | Create a new session (optionally in a chosen working directory) |
 | `set_session_name` | Set the display name for a session |
 | `get_state` | Get current session state |
 | `get_messages` | Get all messages in current session |
