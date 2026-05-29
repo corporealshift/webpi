@@ -885,6 +885,12 @@
         state.wsDownSince = null;
         updateFooterDot();
         listSessions();
+        // Re-subscribe to the session we were viewing so a dropped+reconnected
+        // socket (e.g. phone sleep) resumes the conversation without the user
+        // having to reselect it from the list.
+        if (state.activeSession) {
+          connectToSession(state.activeSession);
+        }
       };
 
       ws.onclose = (e) => {
