@@ -136,14 +136,33 @@ Open `http://localhost:3456` in your browser. The server will:
 
 ## Running on your phone
 
+The easiest and most secure option is [Tailscale](https://tailscale.com) — a
+zero-config WireGuard mesh VPN. Install it on both your computer and your phone,
+sign into the same account, and your devices can reach each other directly over
+an encrypted connection from anywhere, with no ports exposed to the public
+internet.
+
+1. Install Tailscale on your computer and phone, signed into the same account
+2. Start the server: `npm run dev`
+3. From your phone, visit `http://<your-machine>.<your-tailnet>.ts.net:3456`
+   (find the hostname with `tailscale status`, or enable [MagicDNS](https://tailscale.com/kb/1081/magicdns))
+
+Because Tailscale links your own devices privately, there's no public endpoint
+to lock down — a good fit since web-pi has no authentication of its own.
+
+### On your local network
+
+If your phone is on the same Wi-Fi, you can skip the VPN:
+
 1. Find your computer's local IP: `ipconfig` (Windows) or `ifconfig` (Mac/Linux)
 2. From your phone, visit `http://<your-ip>:3456`
-3. Make sure the port is not blocked by firewall
+3. Make sure the port isn't blocked by your firewall
 
-For remote access over the internet, consider:
-- ngrok: `ngrok http 3456`
-- Cloudflare Tunnel
-- SSH reverse tunnel
+### Other tunnels
+
+Tailscale is recommended, but any tunnel works — e.g. a Cloudflare Tunnel, an
+SSH reverse tunnel, or `ngrok http 3456`. Note these expose the server publicly,
+so put authentication in front of it first.
 
 ## Project Structure
 
