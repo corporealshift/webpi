@@ -188,6 +188,13 @@ npm run dev
 npm run build
 ```
 
+## Built with pi
+
+web-pi was built *by* pi, *for* pi — a coding agent writing its own remote
+control. The design specs, implementation plans, and most of the code were
+produced through pi coding sessions, then dogfooded by driving those very
+sessions from a phone. Turtles all the way down.
+
 ## License
 
 MIT
