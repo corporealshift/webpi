@@ -1048,9 +1048,12 @@
       .token-stat-value { font-size: 26px; }
       .token-stat-card { padding: 16px; }
 
-      /* The 24-hour view has too many labels for a phone — show every 4th. */
+      /* The 24-hour view has too many labels for a phone — show every 4th.
+         Use visibility (not display:none) so the hidden labels still reserve
+         their box; otherwise those columns lose the label's height and their
+         bars drop below the labeled columns, leaving a ragged baseline. */
       .token-chart.hourly .token-chart-bar-group:not(:nth-child(4n+1)) .token-chart-label {
-        display: none;
+        visibility: hidden;
       }
     }
 
