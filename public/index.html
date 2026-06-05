@@ -84,6 +84,387 @@
       gap: 8px;
     }
 
+    /* ─── Token stats screen (full-width overlay) ────────────── */
+    .token-screen {
+      position: absolute;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      flex-direction: column;
+      background: var(--bg);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .token-screen.active {
+      display: flex;
+    }
+
+    /* Hide session list when token screen is active */
+    .main:has(.token-screen.active) .session-list {
+      display: none;
+    }
+
+    .token-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+      background: var(--bg-secondary);
+    }
+
+    .token-back-btn {
+      width: 40px;
+      height: 40px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text);
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .token-back-btn:hover { background: var(--border); }
+
+    .token-title {
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .token-period-toggle {
+      display: flex;
+      gap: 4px;
+      margin-left: auto;
+      background: var(--bg-tertiary);
+      border-radius: 10px;
+      padding: 4px;
+    }
+
+    .token-period-btn {
+      padding: 8px 20px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .token-period-btn.active {
+      background: var(--accent-dim);
+      color: white;
+    }
+    .token-period-btn:hover:not(.active) { color: var(--text); }
+
+    .token-summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding: 20px 24px;
+      flex-shrink: 0;
+    }
+
+    .token-stat-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+
+    .token-stat-label {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .token-stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      line-height: 1.1;
+    }
+
+    .token-stat-value.input-tokens { color: var(--accent); }
+    .token-stat-value.output-tokens { color: var(--green); }
+    .token-stat-value.cache-tokens { color: var(--purple); }
+    .token-stat-value.total-tokens { color: var(--text); }
+
+    .token-chart-area {
+      flex: none;
+      padding: 0 24px 24px;
+      display: flex;
+      align-items: flex-end;
+    }
+
+    .token-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      height: 320px;
+      padding-top: 20px;
+      width: 100%;
+      position: relative;
+    }
+
+    .token-chart-bar-group {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      height: 100%;
+      justify-content: flex-end;
+    }
+
+    .token-chart-bar-stack {
+      width: 100%;
+      max-width: 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      justify-content: flex-end;
+    }
+
+    .token-chart-bar {
+      width: 100%;
+      border-radius: 4px;
+      min-height: 3px;
+      position: relative;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .token-chart-bar:hover { opacity: 0.8; }
+    .token-chart-bar.input-bar { background: var(--accent); }
+    .token-chart-bar.output-bar { background: var(--green); }
+    .token-chart-bar.cache-bar { background: var(--purple); }
+
+    .token-chart-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 80px;
+    }
+
+    .token-legend {
+      display: flex;
+      gap: 24px;
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+      justify-content: center;
+      background: var(--bg-secondary);
+    }
+
+    .token-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--text-muted);
+      cursor: default;
+    }
+
+    .token-legend-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+    }
+    .token-legend-dot.input { background: var(--accent); }
+    .token-legend-dot.output { background: var(--green); }
+    .token-legend-dot.cache { background: var(--purple); }
+
+    .token-detail-tooltip {
+      position: fixed;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      z-index: 2000;
+      pointer-events: none;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      display: none;
+      max-width: 260px;
+    }
+
+    .token-detail-tooltip.visible { display: block; }
+
+    .token-detail-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 3px 0;
+    }
+
+    .token-detail-label { color: var(--text-muted); }
+    .token-detail-value { font-weight: 600; }
+    .token-detail-value.input { color: var(--accent); }
+    .token-detail-value.output { color: var(--green); }
+    .token-detail-value.cache { color: var(--purple); }
+    .token-detail-value.total { color: var(--text); font-weight: 700; }
+    .token-detail-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 6px 0;
+    }
+
+    .token-no-data {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      color: var(--text-muted);
+      gap: 12px;
+      padding: 64px;
+    }
+
+    .token-no-data .icon { font-size: 64px; opacity: 0.3; }
+    .token-no-data p { font-size: 18px; text-align: center; line-height: 1.5; }
+
+    /* ─── Activity section ───────────────────────────────────── */
+    .activity-section {
+      border-top: 1px solid var(--border);
+      background: var(--bg-secondary);
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      max-height: 50vh;
+    }
+
+    .activity-header {
+      padding: 16px 24px 8px;
+      flex-shrink: 0;
+    }
+
+    .activity-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .activity-summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 8px 24px 16px;
+      flex-shrink: 0;
+    }
+
+    .activity-stat-card {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+    }
+
+    .activity-stat-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .activity-stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+    }
+
+    .activity-stat-value.messages { color: var(--text); }
+    .activity-stat-value.user-msgs { color: var(--accent); }
+    .activity-stat-value.assistant-msgs { color: var(--green); }
+    .activity-stat-value.errors { color: var(--red); }
+
+    .activity-chart-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 24px 16px;
+    }
+
+    .activity-chart {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .activity-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .activity-bar-label {
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      width: 100px;
+      text-align: right;
+      flex-shrink: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .activity-bar-track {
+      flex: 1;
+      height: 28px;
+      background: var(--bg-tertiary);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .activity-bar-fill {
+      height: 100%;
+      background: var(--accent-dim);
+      border-radius: 6px;
+      transition: width 0.3s ease;
+      min-width: 2px;
+    }
+
+    .activity-bar-count {
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: var(--text);
+      width: 50px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .activity-no-data {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
     .btn-icon {
       width: 36px;
       height: 36px;
@@ -441,10 +822,43 @@
       font-size: 13px;
       font-weight: 600;
       font-family: var(--font-mono);
+      flex: 1;
+      min-width: 0;
+    }
+
+    .tool-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
 
     .tool-icon {
       font-size: 14px;
+    }
+
+    .tool-name { flex-shrink: 0; }
+
+    /* One-line preview of the command/args, shown next to the tool name. */
+    .tool-cmd {
+      font-weight: 400;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    /* Full command/args, shown at the top of the expanded body. */
+    .tool-args {
+      color: var(--accent);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .tool-args:not(:empty) {
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
     }
 
     .tool-status {
@@ -602,12 +1016,42 @@
         z-index: 100;
       }
 
+      /* Token screen on mobile: covers everything, sits above session list */
+      .token-screen {
+        z-index: 200;
+      }
+
+      /* Hide session list when token screen is active on mobile */
+      .main:has(.token-screen.active) .session-list {
+        display: none !important;
+      }
+
       /* Chat is hidden until a session is active; .show-chat swaps the views */
       .chat-area { display: none; }
       .main.show-chat .session-list { display: none; }
       .main.show-chat .chat-area { display: flex; }
 
       .message { max-width: 95%; }
+
+      /* Ensure session list items are touch-friendly */
+      .session-item {
+        min-height: 56px;
+        padding: 14px 12px;
+      }
+
+      /* Four stat cards don't fit a phone width — stack them 2×2 and shrink the
+         big numbers so values like "308.1M" don't spill and cause a side scroll. */
+      .token-summary,
+      .activity-summary {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .token-stat-value { font-size: 26px; }
+      .token-stat-card { padding: 16px; }
+
+      /* The 24-hour view has too many labels for a phone — show every 4th. */
+      .token-chart.hourly .token-chart-bar-group:not(:nth-child(4n+1)) .token-chart-label {
+        display: none;
+      }
     }
 
     /* ─── Scrollbar ──────────────────────────────────────────── */
@@ -744,6 +1188,9 @@
         <div class="logo"><img src="pi-logo.svg" alt="pi"></div>
         <span>web-pi</span>
       </div>
+      <div class="header-actions">
+        <button class="btn-icon" id="btn-tokens" title="Token usage stats">📊</button>
+      </div>
     </div>
 
     <div class="main" id="main">
@@ -757,6 +1204,38 @@
           <span class="footer-dot disconnected" id="footer-dot"></span>
           <span class="footer-updated" id="footer-updated">Updated —</span>
           <button class="footer-refresh" id="footer-refresh" title="Refresh session list">↻</button>
+        </div>
+      </div>
+
+      <!-- Token Stats Screen (full-width overlay) -->
+      <div class="token-screen" id="token-screen">
+        <div class="token-header">
+          <button class="token-back-btn" id="token-back" title="Back to sessions">←</button>
+          <span class="token-title">Token Usage</span>
+          <div class="token-period-toggle">
+            <button class="token-period-btn active" data-period="all">All</button>
+            <button class="token-period-btn" data-period="week">Week</button>
+            <button class="token-period-btn" data-period="day">Day</button>
+          </div>
+        </div>
+        <div class="token-summary" id="token-summary"></div>
+        <div class="token-chart-area">
+          <div class="token-chart" id="token-chart"></div>
+        </div>
+        <div class="token-legend">
+          <div class="token-legend-item"><span class="token-legend-dot input"></span>Input</div>
+          <div class="token-legend-item"><span class="token-legend-dot output"></span>Output</div>
+        </div>
+
+        <!-- Activity Section -->
+        <div class="activity-section" id="activity-section">
+          <div class="activity-header">
+            <span class="activity-title">Activity</span>
+          </div>
+          <div class="activity-summary" id="activity-summary"></div>
+          <div class="activity-chart-area" id="activity-chart-area">
+            <div class="activity-chart" id="activity-chart"></div>
+          </div>
         </div>
       </div>
 
@@ -798,6 +1277,9 @@
   </div>
 
   <div class="toast-container" id="toast-container"></div>
+
+  <!-- Token detail tooltip -->
+  <div class="token-detail-tooltip" id="token-tooltip"></div>
 
   <div class="modal-backdrop" id="new-session-modal">
     <div class="modal">
@@ -860,6 +1342,23 @@
     const footerDotEl = $('#footer-dot');
     const footerUpdatedEl = $('#footer-updated');
     const footerRefreshEl = $('#footer-refresh');
+
+    // Token stats refs
+    const tokenScreenEl = $('#token-screen');
+    const tokenBackEl = $('#token-back');
+    const tokenSummaryEl = $('#token-summary');
+    const tokenChartEl = $('#token-chart');
+    const tokenTooltipEl = $('#token-tooltip');
+    const btnTokensEl = $('#btn-tokens');
+
+    // Token state
+    let tokenPeriod = 'all'; // 'all' | 'week' | 'day'
+    let tokenLoaded = false;
+    const tokenHourMap = new Map(); // key: 'YYYY-MM-DD HH' → { input, output, cache }
+    const tokenDayMap = new Map(); // key: 'YYYY-MM-DD' → { input, output, cache }
+    const tokenWeekMap = new Map(); // key: 'YYYY-WW' → { input, output, cache }
+    // Activity data
+    let activityData = null; // { totalMessages, totalUserMessages, totalAssistantMessages, totalErrors, toolCalls }
 
     // ─── WebSocket ──────────────────────────────────────────────────────────────
     function updateFooterTimestamp() {
@@ -1119,6 +1618,33 @@
           showToast(event.message, 'error');
           break;
 
+        case 'token_stats': {
+          tokenHourMap.clear();
+          tokenDayMap.clear();
+          tokenWeekMap.clear();
+          for (const [k, v] of Object.entries(event.byHour ?? {})) {
+            tokenHourMap.set(k, v);
+          }
+          for (const [k, v] of Object.entries(event.byDay ?? {})) {
+            tokenDayMap.set(k, v);
+          }
+          for (const [k, v] of Object.entries(event.byWeek ?? {})) {
+            tokenWeekMap.set(k, v);
+          }
+          activityData = {
+            totalMessages: event.totalMessages ?? 0,
+            totalUserMessages: event.totalUserMessages ?? 0,
+            totalAssistantMessages: event.totalAssistantMessages ?? 0,
+            totalErrors: event.totalErrors ?? 0,
+            toolCalls: event.toolCalls ?? {},
+          };
+          tokenLoaded = true;
+          if (tokenScreenEl.classList.contains('active')) {
+            renderTokenStats();
+          }
+          break;
+        }
+
         case 'state':
           if (event.data) {
             if (event.data.model) {
@@ -1346,6 +1872,24 @@
     // ─── Tool events ────────────────────────────────────────────────────────────
     const toolElements = new Map();
 
+    // Build a readable one-line command from a tool's arguments — the actual
+    // command for bash, the path for file tools, the pattern for search, etc.
+    function toolCommandText(args) {
+      if (!args || typeof args !== 'object') return '';
+      if (typeof args.command === 'string') return args.command;
+      if (typeof args.cmd === 'string') return args.cmd;
+      if (typeof args.pattern === 'string') {
+        return args.path ? `${args.pattern}  (${args.path})` : args.pattern;
+      }
+      const path = args.path ?? args.file_path ?? args.filePath;
+      if (typeof path === 'string') return path;
+      const entries = Object.entries(args);
+      if (!entries.length) return '';
+      return entries
+        .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+        .join('  ');
+    }
+
     function renderToolEvent(event) {
       const key = event.toolCallId;
       const toolNames = {
@@ -1365,15 +1909,17 @@
           <div class="tool-header">
             <div class="tool-header-left">
               <span class="tool-icon">${icon}</span>
-              <span>${event.toolName}</span>
+              <span class="tool-name"></span>
+              <span class="tool-cmd"></span>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;">
+            <div class="tool-header-right">
               <span class="tool-status pending">pending</span>
               <span class="tool-toggle">▼</span>
             </div>
           </div>
-          <div class="tool-body collapsed"></div>
+          <div class="tool-body collapsed"><div class="tool-args"></div><div class="tool-output"></div></div>
         `;
+        el.querySelector('.tool-name').textContent = event.toolName;
         messagesEl.appendChild(el);
 
         // Toggle collapse
@@ -1389,23 +1935,32 @@
 
       const statusEl = el.querySelector('.tool-status');
       const bodyEl = el.querySelector('.tool-body');
+      const outputEl = el.querySelector('.tool-output');
+
+      // Args arrive on the "start" event (live) or the tool-call entry (replay);
+      // the result arrives separately. Populate each whenever it's present so we
+      // never clobber the command with a later, args-less event.
+      const cmdText = toolCommandText(event.args);
+      if (cmdText) {
+        el.querySelector('.tool-cmd').textContent = cmdText;
+        el.querySelector('.tool-args').textContent = cmdText;
+      }
 
       if (event.status === 'start') {
         statusEl.className = 'tool-status pending';
         statusEl.textContent = 'pending';
-        bodyEl.textContent = '';
       }
 
       if (event.status === 'running' || event.status === 'update') {
         statusEl.className = 'tool-status running';
         statusEl.textContent = 'running';
-        if (event.result) bodyEl.textContent = event.result;
+        if (event.result) outputEl.textContent = event.result;
       }
 
       if (event.status === 'end') {
         statusEl.className = `tool-status ${event.isError ? 'error' : 'done'}`;
         statusEl.textContent = event.isError ? 'error' : 'done';
-        if (event.result) bodyEl.textContent = event.result;
+        if (event.result) outputEl.textContent = event.result;
       }
 
       scrollToBottom();
@@ -1487,7 +2042,312 @@
     window.addEventListener('resize', updateMobileMenu);
     updateMobileMenu();
 
-    // Size the layout to the visible viewport so the mobile keyboard doesn't
+    // ─── Token Stats Screen ─────────────────────────────────────────────────
+    function getWeekKey(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      return d.getUTCFullYear() + '-W' + String(weekNo).padStart(2, '0');
+    }
+
+    function formatWeekKey(key) {
+      const [year, week] = key.split('-W');
+      return 'W' + week + ' ' + year;
+    }
+
+    function formatNumber(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return String(n);
+    }
+
+    function openTokenScreen() {
+      tokenScreenEl.classList.add('active');
+      if (!tokenLoaded) {
+        send({ type: 'get_token_stats' });
+      }
+      renderTokenStats();
+    }
+
+    function closeTokenScreen() {
+      tokenScreenEl.classList.remove('active');
+    }
+
+    // Format a Date into the local-time bucket keys the server emits.
+    function formatDayKey(d) {
+      return d.getFullYear() + '-' +
+        String(d.getMonth() + 1).padStart(2, '0') + '-' +
+        String(d.getDate()).padStart(2, '0');
+    }
+    function formatHourKey(d) {
+      return formatDayKey(d) + ' ' + String(d.getHours()).padStart(2, '0');
+    }
+
+    function renderTokenStats() {
+      let map;
+      if (tokenPeriod === 'all') map = tokenWeekMap;
+      else if (tokenPeriod === 'week') map = tokenDayMap;
+      else map = tokenHourMap;
+      let entries = Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+      // The period toggle selects both granularity *and* a time window. Week and
+      // Day generate every bucket across the window so idle days/hours still show
+      // up on the axis (as empty columns), rather than collapsing the timeline.
+      //   All  → every weekly bucket that has data
+      //   Week → all 7 days of the last week
+      //   Day  → all 24 hours of the last day
+      const zero = () => ({ input: 0, output: 0, cache: 0 });
+      if (tokenPeriod === 'week') {
+        const t = new Date();
+        entries = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - i);
+          const k = formatDayKey(d);
+          entries.push([k, map.get(k) ?? zero()]);
+        }
+      } else if (tokenPeriod === 'day') {
+        const t = new Date();
+        entries = [];
+        for (let i = 23; i >= 0; i--) {
+          const d = new Date(t.getFullYear(), t.getMonth(), t.getDate(), t.getHours() - i);
+          const k = formatHourKey(d);
+          entries.push([k, map.get(k) ?? zero()]);
+        }
+      }
+
+      if (entries.length === 0) {
+        tokenSummaryEl.innerHTML = '';
+        tokenChartEl.innerHTML = `
+          <div class="token-no-data">
+            <div class="icon">📊</div>
+            <p>No token data yet.<br>Token usage will appear here as sessions run.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Compute totals
+      let totalInput = 0, totalOutput = 0, totalCache = 0;
+      for (const [, v] of entries) {
+        totalInput += v.input;
+        totalOutput += v.output;
+        totalCache += v.cache;
+      }
+      const totalTokens = totalInput + totalOutput + totalCache;
+
+      // Summary cards
+      tokenSummaryEl.innerHTML = `
+        <div class="token-stat-card">
+          <div class="token-stat-label">Total Tokens</div>
+          <div class="token-stat-value total-tokens">${formatNumber(totalTokens)}</div>
+        </div>
+        <div class="token-stat-card">
+          <div class="token-stat-label">Input</div>
+          <div class="token-stat-value input-tokens">${formatNumber(totalInput)}</div>
+        </div>
+        <div class="token-stat-card">
+          <div class="token-stat-label">Output</div>
+          <div class="token-stat-value output-tokens">${formatNumber(totalOutput)}</div>
+        </div>
+        <div class="token-stat-card">
+          <div class="token-stat-label">Cache</div>
+          <div class="token-stat-value cache-tokens">${formatNumber(totalCache)}</div>
+        </div>
+      `;
+
+      // Chart — visualizes input + output only. Cache dwarfs both (it's often
+      // 50–100×), so stacking it flattens the real usage into a sliver; cache
+      // still appears in the summary cards and the per-bar tooltip.
+      const maxVal = Math.max(...entries.map(([, v]) => v.input + v.output), 1);
+
+      tokenChartEl.innerHTML = '';
+      // Flag the dense 24-column hourly view so CSS can thin labels on phones.
+      tokenChartEl.classList.toggle('hourly', tokenPeriod === 'day');
+
+      for (const [key, v] of entries) {
+        const group = document.createElement('div');
+        group.className = 'token-chart-bar-group';
+
+        const stack = document.createElement('div');
+        stack.className = 'token-chart-bar-stack';
+
+        // Heights are a percentage of the tallest stack, so the busiest column
+        // fills the stack exactly (never overflowing and pushing the label down).
+        const inputH = (v.input / maxVal) * 100;
+        const outputH = (v.output / maxVal) * 100;
+
+        const tip = JSON.stringify({ label: key, cache: v.cache, input: v.input, output: v.output });
+
+        // Only render a bar when there's usage, so idle buckets stay empty
+        // (a labeled column with no nub) instead of showing a min-height stub.
+        if (v.output > 0) {
+          const outputBar = document.createElement('div');
+          outputBar.className = 'token-chart-bar output-bar';
+          outputBar.style.height = outputH + '%';
+          outputBar.dataset.tooltip = tip;
+          stack.appendChild(outputBar);
+        }
+
+        if (v.input > 0) {
+          const inputBar = document.createElement('div');
+          inputBar.className = 'token-chart-bar input-bar';
+          inputBar.style.height = inputH + '%';
+          inputBar.dataset.tooltip = tip;
+          stack.appendChild(inputBar);
+        }
+
+        group.appendChild(stack);
+
+        const label = document.createElement('div');
+        label.className = 'token-chart-label';
+        if (tokenPeriod === 'all') {
+          label.textContent = formatWeekKey(key);
+        } else if (tokenPeriod === 'week') {
+          label.textContent = key.slice(5); // MM-DD
+        } else {
+          // Day: show hour like "14:00"
+          const [datePart, hourPart] = key.split(' ');
+          label.textContent = hourPart + ':00';
+        }
+        group.appendChild(label);
+
+        tokenChartEl.appendChild(group);
+      }
+
+      // Attach tooltip listeners
+      tokenChartEl.querySelectorAll('.token-chart-bar').forEach(bar => {
+        bar.addEventListener('mouseenter', showTokenTooltip);
+        bar.addEventListener('mousemove', moveTokenTooltip);
+        bar.addEventListener('mouseleave', hideTokenTooltip);
+        bar.addEventListener('touchstart', showTokenTooltip);
+        bar.addEventListener('touchend', hideTokenTooltip);
+      });
+
+      // Render activity section
+      renderActivitySection();
+    }
+
+    function renderActivitySection() {
+      if (!activityData) {
+        const chartArea = document.getElementById('activity-chart-area');
+        if (chartArea) {
+          chartArea.innerHTML = '<div class="activity-no-data">No activity data yet</div>';
+        }
+        return;
+      }
+
+      const { totalMessages, totalUserMessages, totalAssistantMessages, totalErrors, toolCalls } = activityData;
+      const summaryEl = document.getElementById('activity-summary');
+      summaryEl.innerHTML = `
+        <div class="activity-stat-card">
+          <div class="activity-stat-label">Total Messages</div>
+          <div class="activity-stat-value messages">${totalMessages}</div>
+        </div>
+        <div class="activity-stat-card">
+          <div class="activity-stat-label">User</div>
+          <div class="activity-stat-value user-msgs">${totalUserMessages}</div>
+        </div>
+        <div class="activity-stat-card">
+          <div class="activity-stat-label">Assistant</div>
+          <div class="activity-stat-value assistant-msgs">${totalAssistantMessages}</div>
+        </div>
+        <div class="activity-stat-card">
+          <div class="activity-stat-label">Errors</div>
+          <div class="activity-stat-value errors">${totalErrors}</div>
+        </div>
+      `;
+
+      const chartEl = document.getElementById('activity-chart');
+      if (!chartEl) return;
+
+      const sortedTools = Object.entries(toolCalls).sort((a, b) => b[1] - a[1]);
+      const maxCount = Math.max(...sortedTools.map(([, c]) => c), 1);
+
+      if (sortedTools.length === 0) {
+        chartEl.innerHTML = '<div class="activity-no-data">No tool calls recorded yet</div>';
+        return;
+      }
+
+      chartEl.innerHTML = '';
+      for (const [toolName, count] of sortedTools) {
+        const row = document.createElement('div');
+        row.className = 'activity-bar-row';
+        const pct = (count / maxCount) * 100;
+        row.innerHTML = `
+          <span class="activity-bar-label" title="${toolName}">${toolName}</span>
+          <div class="activity-bar-track">
+            <div class="activity-bar-fill" style="width: ${pct}%"></div>
+          </div>
+          <span class="activity-bar-count">${count}</span>
+        `;
+        chartEl.appendChild(row);
+      }
+    }
+
+    function showTokenTooltip(e) {
+      const data = JSON.parse(e.target.dataset.tooltip);
+      const total = data.input + data.output + data.cache;
+      tokenTooltipEl.innerHTML = `
+        <div class="token-detail-row"><span class="token-detail-label">Period</span><span class="token-detail-value total">${data.label}</span></div>
+        <div class="token-detail-divider"></div>
+        <div class="token-detail-row"><span class="token-detail-label">Input</span><span class="token-detail-value input">${formatNumber(data.input)}</span></div>
+        <div class="token-detail-row"><span class="token-detail-label">Output</span><span class="token-detail-value output">${formatNumber(data.output)}</span></div>
+        <div class="token-detail-row"><span class="token-detail-label">Cache</span><span class="token-detail-value cache">${formatNumber(data.cache)}</span></div>
+        <div class="token-detail-divider"></div>
+        <div class="token-detail-row"><span class="token-detail-label">Total</span><span class="token-detail-value total">${formatNumber(total)}</span></div>
+      `;
+      tokenTooltipEl.classList.add('visible');
+      moveTokenTooltip(e);
+    }
+
+    function moveTokenTooltip(e) {
+      const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+      const y = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+      tokenTooltipEl.style.left = (x + 12) + 'px';
+      tokenTooltipEl.style.top = (y - 10) + 'px';
+      // Keep tooltip on screen
+      const rect = tokenTooltipEl.getBoundingClientRect();
+      if (rect.right > window.innerWidth) {
+        tokenTooltipEl.style.left = (x - rect.width - 12) + 'px';
+      }
+      if (rect.bottom > window.innerHeight) {
+        tokenTooltipEl.style.top = (y - rect.height - 10) + 'px';
+      }
+    }
+
+    function hideTokenTooltip() {
+      tokenTooltipEl.classList.remove('visible');
+    }
+
+    // Period toggle buttons
+    document.querySelectorAll('.token-period-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.token-period-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        tokenPeriod = btn.dataset.period;
+        renderTokenStats();
+      });
+    });
+
+    // Helper for period label formatting
+    function formatHourLabel(key) {
+      const [datePart, hourPart] = key.split(' ');
+      return datePart.slice(5) + ' ' + hourPart + ':00';
+    }
+
+    // Tokens button
+    btnTokensEl.addEventListener('click', () => {
+      openTokenScreen();
+    });
+
+    // Token back button
+    tokenBackEl.addEventListener('click', () => {
+      closeTokenScreen();
+    });
+
+    // ─── New session ────────────────────────────────────────────────────────── so the mobile keyboard doesn't
     // cover the input field — iOS Safari doesn't shrink dvh when the keyboard opens.
     const vv = window.visualViewport;
     if (vv) {

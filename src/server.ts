@@ -11,7 +11,7 @@ import {
   DefaultResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { ClientCommand, SessionInfo, ServerEvent } from "./types.js";
+import type { ClientCommand, SessionInfo, ServerEvent, TokenDayStats } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = path.join(
@@ -691,6 +691,171 @@ function handleAgentEvent(s: SessionState, event: AgentSessionEvent): void {
   }
 }
 
+// ─── Token stats aggregation ────────────────────────────────────────────────
+
+// Extract the program name from a bash command line for activity breakdown.
+// Skips leading `VAR=value` env assignments and reduces a path to its basename,
+// so `/usr/bin/git`, `./git`, and `FOO=1 git` all read as "git".
+function bashSubcommand(command: string): string | null {
+  if (!command) return null;
+  let cmd = command.trim();
+  // Unwrap leading `cd <dir> &&` / `cd <dir>;` prefixes so we report the real
+  // command being run rather than the directory change in front of it.
+  while (/^cd\s+\S+\s*(&&|;)\s*/.test(cmd)) {
+    cmd = cmd.replace(/^cd\s+\S+\s*(&&|;)\s*/, "");
+  }
+  const tokens = cmd.split(/\s+/);
+  let i = 0;
+  // Skip leading VAR=value env assignments.
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  let tok = tokens[i];
+  if (!tok) return null;
+  // Strip a leading call operator / opening quote and any trailing quote.
+  tok = tok.replace(/^[&("']+/, "").replace(/["']+$/, "");
+  // Reduce a path to its basename so /usr/bin/git and ./git both read as "git".
+  tok = tok.split(/[\\/]/).pop() || tok;
+  // Normalize Windows executables: powershell.exe -> powershell.
+  tok = tok.replace(/\.exe$/i, "");
+  return tok || null;
+}
+
+interface DayTokens {
+  input: number;
+  output: number;
+  cache: number;
+}
+
+interface HourTokens {
+  input: number;
+  output: number;
+  cache: number;
+}
+
+async function aggregateTokenStats(): Promise<{
+  byHour: Record<string, HourTokens>;
+  byDay: Record<string, DayTokens>;
+  byWeek: Record<string, DayTokens>;
+  totalMessages: number;
+  totalUserMessages: number;
+  totalAssistantMessages: number;
+  totalErrors: number;
+  toolCalls: Record<string, number>;
+}> {
+  const byHour = new Map<string, HourTokens>();
+  const byDay = new Map<string, DayTokens>();
+  const byWeek = new Map<string, DayTokens>();
+  let totalMessages = 0;
+  let totalUserMessages = 0;
+  let totalAssistantMessages = 0;
+  let totalErrors = 0;
+  const toolCalls = new Map<string, number>();
+
+  try {
+    const list = await SessionManager.listAll();
+    for (const s of list) {
+      const filePath = s.path;
+      if (!filePath) continue;
+      const data = fs.readFileSync(filePath, "utf8");
+      const lines = data.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const entry = JSON.parse(trimmed);
+          if (entry.type !== "message") continue;
+          const msg = entry.message ?? entry;
+          totalMessages++;
+          if (msg.role === "user") totalUserMessages++;
+          else if (msg.role === "assistant") {
+            totalAssistantMessages++;
+            const content = msg.content;
+            if (Array.isArray(content)) {
+              for (const c of content) {
+                if (c.type === "toolCall" || c.type === "tool_use") {
+                  const toolName = c.name ?? c.tool_name ?? "unknown";
+                  // Break bash down by the leading command (e.g. "bash: git")
+                  // so the activity view shows what's actually being run.
+                  let key = toolName;
+                  if (toolName === "bash") {
+                    const args = c.arguments ?? c.args ?? c.input ?? {};
+                    const cmd = typeof args.command === "string" ? args.command
+                      : typeof args.cmd === "string" ? args.cmd : "";
+                    const sub = bashSubcommand(cmd);
+                    key = sub ? `bash: ${sub}` : "bash";
+                  }
+                  toolCalls.set(key, (toolCalls.get(key) ?? 0) + 1);
+                }
+              }
+            }
+            if (msg.stopReason === "error" || msg.isError) totalErrors++;
+          }
+          const usage = msg.usage;
+          if (!usage) continue;
+          const ts = msg.timestamp ?? Date.now();
+          const d = new Date(ts);
+
+          // Hour key: "YYYY-MM-DD HH"
+          const hourKey = d.getFullYear() + "-" +
+            String(d.getMonth() + 1).padStart(2, "0") + "-" +
+            String(d.getDate()).padStart(2, "0") + " " +
+            String(d.getHours()).padStart(2, "0");
+          // Day key: "YYYY-MM-DD"
+          const dayKey = d.getFullYear() + "-" +
+            String(d.getMonth() + 1).padStart(2, "0") + "-" +
+            String(d.getDate()).padStart(2, "0");
+          // Week key: "YYYY-Www"
+          const weekKey = getISOWeekKey(d);
+
+          // Hour
+          if (!byHour.has(hourKey)) byHour.set(hourKey, { input: 0, output: 0, cache: 0 });
+          const hTok = byHour.get(hourKey)!;
+          hTok.input += usage.input ?? 0;
+          hTok.output += usage.output ?? 0;
+          hTok.cache += (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+
+          // Day
+          if (!byDay.has(dayKey)) byDay.set(dayKey, { input: 0, output: 0, cache: 0 });
+          const dTok = byDay.get(dayKey)!;
+          dTok.input += usage.input ?? 0;
+          dTok.output += usage.output ?? 0;
+          dTok.cache += (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+
+          // Week
+          if (!byWeek.has(weekKey)) byWeek.set(weekKey, { input: 0, output: 0, cache: 0 });
+          const wTok = byWeek.get(weekKey)!;
+          wTok.input += usage.input ?? 0;
+          wTok.output += usage.output ?? 0;
+          wTok.cache += (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+        } catch {
+          // skip malformed lines
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[token_stats] error aggregating:", err);
+  }
+
+  return {
+    byHour: Object.fromEntries(byHour),
+    byDay: Object.fromEntries(byDay),
+    byWeek: Object.fromEntries(byWeek),
+    totalMessages,
+    totalUserMessages,
+    totalAssistantMessages,
+    totalErrors,
+    toolCalls: Object.fromEntries(toolCalls),
+  };
+}
+
+function getISOWeekKey(date: Date): string {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return d.getUTCFullYear() + "-W" + String(weekNo).padStart(2, "0");
+}
+
 // ─── Per-client commands ────────────────────────────────────────────────────
 
 async function listSessions(client: Client): Promise<void> {
@@ -762,7 +927,9 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
           if (ev.type === "message") {
             sendToClient(client, { type: "message", sessionId: s.sessionId, message: ev.payload });
           } else if (ev.type === "tool") {
-            sendToClient(client, { type: "tool", sessionId: s.sessionId, ...ev.payload });
+            // sessionId must win over ev.payload's (which is "" from decompose),
+            // or the client's clientSessionId guard drops these args-bearing events.
+            sendToClient(client, { type: "tool", ...ev.payload, sessionId: s.sessionId });
           }
         }
       } else if (msg.role === "toolResult" || msg.role === "tool") {
@@ -1031,6 +1198,33 @@ async function handleCommand(client: Client, command: ClientCommand): Promise<vo
     case "get_messages":
       // No-op: server pushes state via session_update + message events
       break;
+    case "get_token_stats": {
+      const stats = await aggregateTokenStats();
+      const hourStats: Record<string, TokenDayStats> = {};
+      for (const [k, v] of Object.entries(stats.byHour)) {
+        hourStats[k] = v as TokenDayStats;
+      }
+      const dayStats: Record<string, TokenDayStats> = {};
+      for (const [k, v] of Object.entries(stats.byDay)) {
+        dayStats[k] = v as TokenDayStats;
+      }
+      const weekStats: Record<string, TokenDayStats> = {};
+      for (const [k, v] of Object.entries(stats.byWeek)) {
+        weekStats[k] = v as TokenDayStats;
+      }
+      sendToClient(client, {
+        type: "token_stats",
+        byHour: hourStats,
+        byDay: dayStats,
+        byWeek: weekStats,
+        totalMessages: stats.totalMessages,
+        totalUserMessages: stats.totalUserMessages,
+        totalAssistantMessages: stats.totalAssistantMessages,
+        totalErrors: stats.totalErrors,
+        toolCalls: stats.toolCalls,
+      });
+      break;
+    }
     default:
       sendToClient(client, {
         type: "error",

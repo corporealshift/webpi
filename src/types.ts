@@ -92,6 +92,24 @@ export interface ReplayEndEvent extends ServerEvent {
   sessionId: string;
 }
 
+export interface TokenStatsEvent extends ServerEvent {
+  type: "token_stats";
+  byHour: Record<string, TokenDayStats>;
+  byDay: Record<string, TokenDayStats>;
+  byWeek: Record<string, TokenDayStats>;
+  totalMessages: number;
+  totalUserMessages: number;
+  totalAssistantMessages: number;
+  totalErrors: number;
+  toolCalls: Record<string, number>;
+}
+
+export interface TokenDayStats {
+  input: number;
+  output: number;
+  cache: number;
+}
+
 // ─── Client → Server commands ─────────────────────────────────────────────────
 
 export interface ClientCommand {
@@ -161,6 +179,10 @@ export interface GetMessagesCommand extends ClientCommand {
   type: "get_messages";
 }
 
+export interface GetTokenStatsCommand extends ClientCommand {
+  type: "get_token_stats";
+}
+
 export type AnyClientCommand =
   | ListSessionsCommand
   | ConnectSessionCommand
@@ -173,7 +195,8 @@ export type AnyClientCommand =
   | CompactCommand
   | SetSessionNameCommand
   | GetStateCommand
-  | GetMessagesCommand;
+  | GetMessagesCommand
+  | GetTokenStatsCommand;
 
 // ─── Pi message types ─────────────────────────────────────────────────────────
 
