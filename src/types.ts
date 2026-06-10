@@ -77,6 +77,11 @@ export interface StateEvent extends ServerEvent {
   data: PiState | null;
 }
 
+export interface TaskStateEvent extends ServerEvent {
+  type: "task_state";
+  tasks: Task[];
+}
+
 export interface MessagesEvent extends ServerEvent {
   type: "messages";
   data: PiMessage[];
@@ -102,6 +107,41 @@ export interface TokenStatsEvent extends ServerEvent {
   totalAssistantMessages: number;
   totalErrors: number;
   toolCalls: Record<string, number>;
+}
+
+// ─── Task Manager ─────────────────────────────────────────────────────────────
+
+export interface Task {
+  id: string;
+  title: string;
+  status: "pending" | "in-progress" | "done" | "deferred";
+  priority: "P0" | "P1" | "P2" | "P3";
+  description?: string;
+  created: number;
+  updated: number;
+  completed?: number;
+  notes?: string;
+}
+
+export interface TaskState {
+  tasks: Task[];
+  nextId: number;
+}
+
+export interface TaskUpdateEvent extends ServerEvent {
+  type: "task_update";
+  tasks: Task[];
+}
+
+export interface TaskActionCommand extends ClientCommand {
+  type: "task_action";
+  action: "add" | "start" | "complete" | "defer" | "update" | "delete";
+  id?: string;
+  title?: string;
+  priority?: "P0" | "P1" | "P2" | "P3";
+  description?: string;
+  notes?: string;
+  reason?: string;
 }
 
 export interface TokenDayStats {
@@ -183,6 +223,21 @@ export interface GetTokenStatsCommand extends ClientCommand {
   type: "get_token_stats";
 }
 
+export interface GetTasksCommand extends ClientCommand {
+  type: "get_tasks";
+}
+
+export interface TaskActionCommandClient extends ClientCommand {
+  type: "task_action";
+  action: "add" | "start" | "complete" | "defer" | "update" | "delete";
+  id?: string;
+  title?: string;
+  priority?: "P0" | "P1" | "P2" | "P3";
+  description?: string;
+  notes?: string;
+  reason?: string;
+}
+
 export type AnyClientCommand =
   | ListSessionsCommand
   | ConnectSessionCommand
@@ -196,7 +251,9 @@ export type AnyClientCommand =
   | SetSessionNameCommand
   | GetStateCommand
   | GetMessagesCommand
-  | GetTokenStatsCommand;
+  | GetTokenStatsCommand
+  | GetTasksCommand
+  | TaskActionCommandClient;
 
 // ─── Pi message types ─────────────────────────────────────────────────────────
 

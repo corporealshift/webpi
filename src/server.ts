@@ -11,7 +11,7 @@ import {
   DefaultResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { ClientCommand, SessionInfo, ServerEvent, TokenDayStats } from "./types.js";
+import type { ClientCommand, SessionInfo, ServerEvent, TokenDayStats, Task, TaskState } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = path.join(
@@ -44,6 +44,12 @@ interface SessionState {
   fileTail: string;
   knownEntryIds: Set<string>;
   externalIdleTimer: NodeJS.Timeout | null;
+  // Task manager state (parsed from custom entries)
+  taskState: TaskState | null;
+  // Hash of last broadcast task state (to avoid duplicate broadcasts)
+  lastTaskBroadcastHash: string;
+  // Task watcher for task-manager.json changes
+  taskWatcher: fs.FSWatcher | null;
   // Grace timer: releases an idle session a while after its last viewer leaves.
   idleReleaseTimer: NodeJS.Timeout | null;
   // Owner-mode state
@@ -343,16 +349,22 @@ async function getOrCreateSessionState(sessionFile: string): Promise<SessionStat
     fileTail: leftover,
     knownEntryIds: new Set(entries.map((e) => e.id).filter(Boolean)),
     externalIdleTimer: null,
+    taskState: null,
+    lastTaskBroadcastHash: "",
+    taskWatcher: null,
     idleReleaseTimer: null,
     agentSession: null,
     agentUnsubscribe: null,
     driver: "none",
   };
   s.watcher = startWatcher(s);
+  s.taskState = readTaskStateFile(sessionFile);
+  s.lastTaskBroadcastHash = taskHashOf(s.taskState);
+  s.taskWatcher = startTaskWatcher(s);
   sessions.set(sessionFile, s);
   slog(
     s,
-    `📂 opened cwd=${cwd} entries=${s.knownEntryIds.size} file=${path.basename(sessionFile)}`,
+    `📂 opened cwd=${cwd} entries=${s.knownEntryIds.size} tasks=${s.taskState?.tasks.length ?? 0} file=${path.basename(sessionFile)}`,
   );
   return s;
 }
@@ -902,6 +914,10 @@ async function connectSession(client: Client, sessionFile: string): Promise<void
     messageCount: s.knownEntryIds.size,
     clientSessionId: s.sessionId,
   });
+  // Broadcast task state if available (extracted from existing entries)
+  if (s.taskState) {
+    sendToClient(client, { type: "task_update", tasks: s.taskState.tasks });
+  }
   // Replay all on-disk message entries to the connecting client
   const data = await fs.promises.readFile(sessionFile, "utf8");
   sendToClient(client, { type: "replay_start", sessionId: s.sessionId });
@@ -965,6 +981,7 @@ async function teardownSession(s: SessionState): Promise<void> {
   if (s.agentSession) await releaseOwnership(s);
   if (s.externalIdleTimer) clearTimeout(s.externalIdleTimer);
   s.watcher?.close();
+  s.taskWatcher?.close();
   sessions.delete(s.sessionFile);
   console.log(`[session ${s.sessionId}] torn down (no viewers, idle)`);
 }
@@ -1107,6 +1124,9 @@ async function handleNewSession(client: Client, requestedCwd?: string): Promise<
       fileTail: "",
       knownEntryIds: new Set(),
       externalIdleTimer: null,
+      taskState: null,
+      lastTaskBroadcastHash: "",
+      taskWatcher: null,
       idleReleaseTimer: null,
       agentSession: session,
       agentUnsubscribe: null,
@@ -1126,6 +1146,9 @@ async function handleNewSession(client: Client, requestedCwd?: string): Promise<
       // file may not exist yet — fileSize stays 0
     }
     s.watcher = startWatcher(s);
+    s.taskState = readTaskStateFile(sessionFile);
+    s.lastTaskBroadcastHash = taskHashOf(s.taskState);
+    s.taskWatcher = startTaskWatcher(s);
     sessions.set(sessionFile, s);
     client.subscribedSessionFile = sessionFile;
     sendToClient(client, {
@@ -1160,6 +1183,175 @@ async function handleSetSessionName(client: Client, name: string): Promise<void>
     }
   }
   broadcastDriverUpdate(s, { sessionName: name });
+}
+
+// ─── Task state helpers (task-manager.json) ───────────────────────────────────
+
+function taskStatePath(sessionFile: string): string {
+  return path.join(path.dirname(sessionFile), "task-manager.json");
+}
+
+function readTaskStateFile(sessionFile: string): TaskState | null {
+  try {
+    const raw = fs.readFileSync(taskStatePath(sessionFile), "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.tasks) && parsed.nextId !== undefined) {
+      return parsed as TaskState;
+    }
+  } catch {
+    // missing or corrupt file — no tasks
+  }
+  return null;
+}
+
+function writeTaskStateFile(sessionFile: string, state: TaskState): void {
+  fs.writeFileSync(taskStatePath(sessionFile), JSON.stringify(state, null, 2), "utf8");
+}
+
+function taskHashOf(state: TaskState | null): string {
+  return state ? JSON.stringify(state.tasks) : "";
+}
+
+// Apply a new state: persist, remember the hash, broadcast once.
+function setTaskState(s: SessionState, state: TaskState): void {
+  s.taskState = state;
+  s.lastTaskBroadcastHash = taskHashOf(state);
+  writeTaskStateFile(s.sessionFile, state);
+  broadcastToSession(s, { type: "task_update", tasks: state.tasks });
+}
+
+// Watch the session directory for task-manager.json changes (the file may
+// not exist yet, so watch the directory, not the file).
+function startTaskWatcher(s: SessionState): fs.FSWatcher | null {
+  let pending = false;
+  try {
+    return fs.watch(path.dirname(s.sessionFile), { persistent: false }, (_ev, filename) => {
+      if (filename && filename !== "task-manager.json") return;
+      if (pending) return;
+      pending = true;
+      setTimeout(() => {
+        pending = false;
+        const state = readTaskStateFile(s.sessionFile);
+        const hash = taskHashOf(state);
+        if (hash === s.lastTaskBroadcastHash) return; // our own write, or no change
+        s.taskState = state;
+        s.lastTaskBroadcastHash = hash;
+        broadcastToSession(s, { type: "task_update", tasks: state?.tasks ?? [] });
+      }, 30);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function handleTaskAction(client: Client, action: string, params: any): Promise<void> {
+  const sf = client.subscribedSessionFile;
+  if (!sf) {
+    sendToClient(client, { type: "error", message: "No session selected" });
+    return;
+  }
+  const s = sessions.get(sf);
+  if (!s) {
+    sendToClient(client, { type: "error", message: "Session not found" });
+    return;
+  }
+
+  let state = s.taskState || readTaskStateFile(sf);
+  if (!state) {
+    state = { tasks: [], nextId: 1 };
+  }
+
+  switch (action) {
+    case "add": {
+      if (!params.title) {
+        sendToClient(client, { type: "error", message: "Task title is required" });
+        return;
+      }
+      const id = `T-${String(state.nextId).padStart(3, "0")}`;
+      state.nextId++;
+      const now = Date.now();
+      state.tasks.push({
+        id,
+        title: params.title,
+        status: "pending",
+        priority: (params.priority as Task["priority"]) ?? "P2",
+        description: params.description,
+        created: now,
+        updated: now,
+      });
+      setTaskState(s, state);
+      slog(s, `➕ task added: ${id} ${params.title}`);
+      break;
+    }
+    case "start": {
+      const task = state.tasks.find((t) => t.id === params.id);
+      if (!task) {
+        sendToClient(client, { type: "error", message: `Task ${params.id} not found` });
+        return;
+      }
+      task.status = "in-progress";
+      task.updated = Date.now();
+      setTaskState(s, state);
+      slog(s, `🔨 task started: ${task.id}`);
+      break;
+    }
+    case "complete": {
+      const task = state.tasks.find((t) => t.id === params.id);
+      if (!task) {
+        sendToClient(client, { type: "error", message: `Task ${params.id} not found` });
+        return;
+      }
+      task.status = "done";
+      task.completed = Date.now();
+      task.updated = Date.now();
+      if (params.notes) task.notes = params.notes;
+      setTaskState(s, state);
+      slog(s, `✅ task completed: ${task.id}`);
+      break;
+    }
+    case "defer": {
+      const task = state.tasks.find((t) => t.id === params.id);
+      if (!task) {
+        sendToClient(client, { type: "error", message: `Task ${params.id} not found` });
+        return;
+      }
+      task.status = "deferred";
+      task.updated = Date.now();
+      if (params.reason) task.notes = params.reason;
+      setTaskState(s, state);
+      slog(s, `⏸️ task deferred: ${task.id}`);
+      break;
+    }
+    case "update": {
+      const task = state.tasks.find((t) => t.id === params.id);
+      if (!task) {
+        sendToClient(client, { type: "error", message: `Task ${params.id} not found` });
+        return;
+      }
+      if (params.title) task.title = params.title;
+      if (params.priority) task.priority = params.priority as Task["priority"];
+      if (params.description !== undefined) task.description = params.description;
+      if (params.status) task.status = params.status as Task["status"];
+      task.updated = Date.now();
+      setTaskState(s, state);
+      slog(s, `✏️ task updated: ${task.id}`);
+      break;
+    }
+    case "delete": {
+      const idx = state.tasks.findIndex((t) => t.id === params.id);
+      if (idx === -1) {
+        sendToClient(client, { type: "error", message: `Task ${params.id} not found` });
+        return;
+      }
+      const removed = state.tasks.splice(idx, 1)[0];
+      setTaskState(s, state);
+      slog(s, `🗑️ task deleted: ${removed.id}`);
+      break;
+    }
+    default:
+      sendToClient(client, { type: "error", message: `Unknown task action: ${action}` });
+      return;
+  }
 }
 
 // ─── WS dispatcher ──────────────────────────────────────────────────────────
@@ -1198,6 +1390,25 @@ async function handleCommand(client: Client, command: ClientCommand): Promise<vo
     case "get_messages":
       // No-op: server pushes state via session_update + message events
       break;
+    case "get_tasks": {
+      const sf = client.subscribedSessionFile;
+      if (!sf) {
+        sendToClient(client, { type: "task_update", tasks: [] });
+        return;
+      }
+      const s = sessions.get(sf);
+      if (s && s.taskState) {
+        sendToClient(client, { type: "task_update", tasks: s.taskState.tasks });
+      } else {
+        const state = readTaskStateFile(sf);
+        sendToClient(client, { type: "task_update", tasks: state?.tasks ?? [] });
+      }
+      break;
+    }
+    case "task_action": {
+      await handleTaskAction(client, (command as any).action, (command as any));
+      break;
+    }
     case "get_token_stats": {
       const stats = await aggregateTokenStats();
       const hourStats: Record<string, TokenDayStats> = {};
@@ -1297,6 +1508,7 @@ process.on("SIGINT", async () => {
     }
     if (s.externalIdleTimer) clearTimeout(s.externalIdleTimer);
     s.watcher?.close();
+    s.taskWatcher?.close();
   }
   wss.close();
   httpServer.close();
