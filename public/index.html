@@ -2806,23 +2806,13 @@
 
       if (!tasksPanelEl) return;
 
-      // Show panel only when we have an active session
+      // Show panel only when we have an active session with at least one task;
+      // task_update broadcasts re-render, so it appears as soon as tasks exist
       const hasSession = !!state.activeSession;
-      tasksPanelEl.style.display = hasSession ? 'flex' : 'none';
+      const hasTasks = hasSession && state.tasks && state.tasks.length > 0;
+      tasksPanelEl.style.display = hasTasks ? 'flex' : 'none';
 
-
-      if (!hasSession) return;
-
-      const hasTasks = state.tasks && state.tasks.length > 0;
-
-      if (!hasTasks) {
-        tasksCountEl.textContent = '0';
-        taskNoTasksEl.style.display = 'block';
-        taskNoTasksEl.textContent = 'No tasks yet — add one below';
-        const addRow = document.querySelector('.task-add-row');
-        if (addRow) addRow.style.display = 'flex';
-        return;
-      }
+      if (!hasTasks) return;
 
       taskNoTasksEl.style.display = 'none';
       const addRow = document.querySelector('.task-add-row');
