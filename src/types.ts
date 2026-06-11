@@ -104,6 +104,41 @@ export interface TokenStatsEvent extends ServerEvent {
   toolCalls: Record<string, number>;
 }
 
+// ─── Task Manager ─────────────────────────────────────────────────────────────
+
+export interface Task {
+  id: string;
+  title: string;
+  status: "pending" | "in-progress" | "done" | "deferred";
+  priority: "P0" | "P1" | "P2" | "P3";
+  description?: string;
+  created: number;
+  updated: number;
+  completed?: number;
+  notes?: string;
+}
+
+export interface TaskState {
+  tasks: Task[];
+  nextId: number;
+}
+
+export interface TaskUpdateEvent extends ServerEvent {
+  type: "task_update";
+  tasks: Task[];
+}
+
+export interface TaskActionCommand extends ClientCommand {
+  type: "task_action";
+  action: "add" | "start" | "complete" | "defer" | "update" | "delete";
+  id?: string;
+  title?: string;
+  priority?: "P0" | "P1" | "P2" | "P3";
+  description?: string;
+  notes?: string;
+  reason?: string;
+}
+
 export interface TokenDayStats {
   input: number;
   output: number;
@@ -183,6 +218,10 @@ export interface GetTokenStatsCommand extends ClientCommand {
   type: "get_token_stats";
 }
 
+export interface GetTasksCommand extends ClientCommand {
+  type: "get_tasks";
+}
+
 export type AnyClientCommand =
   | ListSessionsCommand
   | ConnectSessionCommand
@@ -196,7 +235,9 @@ export type AnyClientCommand =
   | SetSessionNameCommand
   | GetStateCommand
   | GetMessagesCommand
-  | GetTokenStatsCommand;
+  | GetTokenStatsCommand
+  | GetTasksCommand
+  | TaskActionCommand;
 
 // ─── Pi message types ─────────────────────────────────────────────────────────
 
