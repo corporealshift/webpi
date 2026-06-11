@@ -1012,7 +1012,7 @@
       transition: transform 0.2s;
     }
 
-    .tasks-toggle.open { transform: rotate(180deg); }
+    .tasks-toggle:not(.open) { transform: rotate(180deg); }
 
     .tasks-body {
       overflow-y: auto;
@@ -2828,10 +2828,7 @@
       const addRow = document.querySelector('.task-add-row');
       if (addRow) addRow.style.display = 'flex';
 
-      // Count active vs done
-      const activeTasks = state.tasks.filter(t => t.status !== 'done');
-      const doneTasks = state.tasks.filter(t => t.status === 'done');
-      tasksCountEl.textContent = activeTasks.length;
+      tasksCountEl.textContent = state.tasks.length;
 
       // Group by status
       const groups = {
